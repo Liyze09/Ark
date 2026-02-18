@@ -1,5 +1,6 @@
 package io.github.liyze09.nexus.mixin.client;
 
+import com.llamalad7.mixinextras.sugar.Local;
 import io.github.liyze09.nexus.render.NexusWorldRenderer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientChunkCache;
@@ -8,6 +9,8 @@ import net.minecraft.network.protocol.game.ClientboundLevelChunkPacketData;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
+
+import org.jspecify.annotations.NonNull;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -26,7 +29,6 @@ public abstract class MixinClientChunkCache {
         if (render.builder != null && render.getWorld() != null) {
             render.builder.rebuild(Objects.requireNonNull(render.getWorld()));
         } else {
-            render.builder.close();
             render.builder = null;
         }
     }
@@ -39,11 +41,15 @@ public abstract class MixinClientChunkCache {
         }
     }
 
-    @Inject(method = "drop", at = @At("HEAD"))
-    public void nexus$onChunkUnload(ChunkPos pos, CallbackInfo ci) {
+    @Inject(method = "drop", at = @At(
+            value = "INVOKE",
+            target = "Lnet/minecraft/client/multiplayer/ClientChunkCache$Storage;drop(ILnet/minecraft/world/level/chunk/LevelChunk;)V",
+            shift = At.Shift.AFTER
+    ))
+    public void nexus$onChunkUnload(ChunkPos pos, CallbackInfo ci, @NonNull @Local LevelChunk chunk) {
         NexusWorldRenderer render = (NexusWorldRenderer) Minecraft.getInstance().levelRenderer;
         if (render.builder != null) {
-            render.builder.unload(pos);
+            render.builder.unload(chunk);
         }
     }
 }

@@ -3,6 +3,7 @@ package io.github.liyze09.nexus;
 import io.github.liyze09.nexus.resource.SharedTextureManager;
 
 import java.io.Closeable;
+import java.lang.foreign.MemorySegment;
 
 /**
  * Instantiating class that wraps Nexus JNI methods.
@@ -41,19 +42,15 @@ public class NexusBackend implements Closeable {
     }
 
     /**
-     * Gets current texture size.
-     *
-     * @return Texture size
+     * Gets current render target's size.
      */
-    public long getTextureSize() {
+    public long getRenderTargetSize() {
         checkClosed();
         return NexusClientMain.getTextureSize(nativeContext);
     }
 
     /**
      * Gets GL ready semaphore handle.
-     *
-     * @return GL ready semaphore handle
      */
     public long getGLReady() {
         checkClosed();
@@ -62,8 +59,6 @@ public class NexusBackend implements Closeable {
 
     /**
      * Gets GL complete semaphore handle.
-     *
-     * @return GL complete semaphore handle
      */
     public long getGLComplete() {
         checkClosed();
@@ -71,9 +66,7 @@ public class NexusBackend implements Closeable {
     }
 
     /**
-     * Gets GL texture handle.
-     *
-     * @return GL texture handle
+     * Gets render target's external texture handle.
      */
     public long getGLTexture() {
         checkClosed();
@@ -81,7 +74,7 @@ public class NexusBackend implements Closeable {
     }
 
     /**
-     * Gets Vulkan texture size.
+     * Gets Vulkan-handled texture's size.
      *
      * @param handle Vulkan texture handle
      * @return Texture size
@@ -126,6 +119,11 @@ public class NexusBackend implements Closeable {
         }
     }
 
+    public void syncTerrainData(long header, MemorySegment data) {
+        checkClosed();
+        NexusClientMain.syncTerrainData(nativeContext, header, data.address(), data.byteSize());
+    }
+
     public void syncAtlas(
         long textureHandle,
         String atlasName,
@@ -148,26 +146,8 @@ public class NexusBackend implements Closeable {
         );
     }
 
-    public void uploadChunkMesh(
-        int chunkX,
-        int chunkZ,
-        float[] vertices,
-        int[] indices
-    ) {
-        checkClosed();
-        NexusClientMain.uploadChunkMesh(
-            nativeContext,
-            chunkX,
-            chunkZ,
-            vertices,
-            indices
-        );
-    }
-
     /**
-     * Gets the underlying native context handle (for advanced use cases).
-     *
-     * @return Native context handle
+     * Gets the underlying native context handle.
      */
     public long getNativeContext() {
         return nativeContext;

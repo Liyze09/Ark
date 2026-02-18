@@ -25,4 +25,15 @@ public class VisibleFaces {
     public boolean isAnyVisible() {
         return north || south || west || east || up || down;
     }
+
+    public byte toFaceMask() {
+        byte mask = 0;
+        if (up) mask |= 1;
+        if (down) mask |= 2;
+        if (north) mask |= 4;
+        if (south) mask |= 8;
+        if (east) mask |= 16;
+        if (west) mask |= 32;
+        return mask;
+    }
 }

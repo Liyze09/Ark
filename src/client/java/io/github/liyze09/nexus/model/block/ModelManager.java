@@ -7,7 +7,7 @@ import java.util.HashMap;
 
 public class ModelManager {
     private static final ModelManager instance = new ModelManager();
-    public HashMap<BlockState, Model> map = new HashMap<>();
+    public HashMap<BlockState, BakedBlock> map = new HashMap<>();
 
     private ModelManager() {
         // TODO: load models
@@ -17,8 +17,20 @@ public class ModelManager {
         return instance;
     }
 
+    private static final BakedBlock DEFAULT_MODEL = new BakedBlock() {
+        @Override
+        public int getModelId() {
+            return 0;
+        }
+
+        @Override
+        public Model getModel() {
+            return CubeModel.INSTANCE;
+        }
+    };
+
     @NotNull
-    public Model getModel(BlockState state) {
-        return map.getOrDefault(state, CubeModel.INSTANCE);
+    public BakedBlock getModel(BlockState state) {
+        return map.getOrDefault(state, DEFAULT_MODEL);
     }
 }

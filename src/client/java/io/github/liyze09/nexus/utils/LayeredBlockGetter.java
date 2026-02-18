@@ -9,8 +9,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.material.FluidState;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.Nullable;
 import org.jspecify.annotations.NonNull;
 
 import static io.github.liyze09.nexus.utils.NexusUtils.*;
@@ -22,7 +21,7 @@ public class LayeredBlockGetter implements BlockGetter {
     private BlockPos origin;
     private BlockPos end;
 
-    public LayeredBlockGetter(@NotNull Level world, @NotNull LevelChunk chunk, @NotNull LevelChunkSection section, int sectionIndex) {
+    public LayeredBlockGetter(@NonNull Level world, @NonNull LevelChunk chunk, @NonNull LevelChunkSection section, int sectionIndex) {
         this.world = world;
         this.section = section;
         this.chunk = chunk;
@@ -30,12 +29,12 @@ public class LayeredBlockGetter implements BlockGetter {
         this.end = this.origin.offset(15, 15, 15);
     }
 
-    public LayeredBlockGetter(@NotNull Level level, @NotNull LevelChunk chunk) {
+    public LayeredBlockGetter(@NonNull Level level, @NonNull LevelChunk chunk) {
         this.world = level;
         this.chunk = chunk;
     }
 
-    public void setSection(@NotNull LevelChunkSection section, int sectionIndex) {
+    public void setSection(@NonNull LevelChunkSection section, int sectionIndex) {
         this.section = section;
         this.origin = SectionPos.of(chunk.getPos(), sectionIndex).origin();
         this.end = this.origin.offset(15, 15, 15);
@@ -50,7 +49,7 @@ public class LayeredBlockGetter implements BlockGetter {
     }
 
     @Override
-    public @NotNull BlockState getBlockState(@NonNull BlockPos blockPos) {
+    public @NonNull BlockState getBlockState(@NonNull BlockPos blockPos) {
         if (world.isDebug()) {
             return world.getBlockState(blockPos);
         } else if (inArea(blockPos, origin, end)) {
@@ -63,7 +62,7 @@ public class LayeredBlockGetter implements BlockGetter {
     }
 
     @Override
-    public @NotNull FluidState getFluidState(@NonNull BlockPos blockPos) {
+    public @NonNull FluidState getFluidState(@NonNull BlockPos blockPos) {
         if (inArea(blockPos, origin, end)) {
             return section.getFluidState(blockPos.getX() - origin.getX(), blockPos.getY() - origin.getY(), blockPos.getZ() - origin.getZ());
         } else if (inChunk(blockPos, chunk)) {

@@ -4,6 +4,8 @@ use std::path::Path;
 use std::process::{exit, Command};
 
 fn main() {
+    let compilation_objects = ["mesh", "task"];
+
     for entry in walkdir::WalkDir::new("src/shaders") {
         let entry = entry.unwrap();
         let filename = entry.file_name().to_str().unwrap();
@@ -12,6 +14,9 @@ fn main() {
         }
 
         let shader_name = &filename.split_at(filename.find(".").unwrap()).0.to_owned();
+        if !compilation_objects.contains(&shader_name.as_str()) {
+            continue;
+        }
         let mut out = Path::new("")
             .join("target")
             .join("shaders")

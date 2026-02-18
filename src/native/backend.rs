@@ -1,11 +1,20 @@
 #![allow(dead_code, unused)]
+pub mod transfer;
+pub mod state;
+
 use anyhow::{anyhow, Error, Result};
 use ash::khr::ray_tracing_pipeline;
-use ash::vk::{ExternalMemoryHandleTypeFlags, MemoryGetWin32HandleInfoKHR, HANDLE};
+use ash::vk::{ExternalMemoryHandleTypeFlags, HANDLE, MemoryGetWin32HandleInfoKHR};
 use dashmap::DashMap;
 use rayon::prelude::*;
 use smallvec::smallvec;
-use std::collections::HashMap;
+use vulkano::descriptor_set::DescriptorSet;
+use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
+use vulkano::descriptor_set::layout::{DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateInfo, DescriptorType};
+use vulkano::pipeline::graphics::rasterization::{CullMode, RasterizationState};
+use vulkano::pipeline::graphics::viewport::ViewportState;
+use vulkano::shader::ShaderStages;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::thread;
@@ -16,7 +25,7 @@ use vulkano::command_buffer::allocator::{
     StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo,
 };
 use vulkano::command_buffer::{
-    AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo, PrimaryCommandBufferAbstract,
+    AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo, PrimaryAutoCommandBuffer, PrimaryCommandBufferAbstract
 };
 use vulkano::command_buffer::{
     ClearColorImageInfo, CommandBufferSubmitInfo, RenderingAttachmentInfo, RenderingInfo,
@@ -37,17 +46,17 @@ use vulkano::memory::{
     MemoryPropertyFlags, ResourceMemory,
 };
 use vulkano::pipeline::graphics::GraphicsPipelineCreateInfo;
-use vulkano::pipeline::layout::PipelineLayoutCreateInfo;
+use vulkano::pipeline::layout::{PipelineDescriptorSetLayoutCreateInfo, PipelineLayoutCreateInfo};
 use vulkano::pipeline::ray_tracing::{RayTracingPipeline, RayTracingPipelineCreateInfo};
-use vulkano::pipeline::{GraphicsPipeline, PipelineLayout};
+use vulkano::pipeline::{GraphicsPipeline, Pipeline, PipelineLayout};
 use vulkano::sync::fence::{Fence, FenceCreateInfo};
 use vulkano::sync::semaphore::{
     ExternalSemaphoreHandleType, ExternalSemaphoreHandleTypes, Semaphore, SemaphoreCreateInfo,
 };
 use vulkano::{DeviceSize, NonExhaustive, Version, VulkanLibrary, VulkanObject};
 use windows_sys::Win32::Foundation::CloseHandle;
-
-use crate::geometry::{GeometryData, GeometryManager, GeometryType};
+use crate::backend::state::RenderStateManager;
+use crate::terrain::BuiltSections;
 use crate::texture::AtlasManager;
 
 #[derive(Clone)]
@@ -62,10 +71,14 @@ pub struct VkBackend {
     memory_type_index: u32,
     render_target: RenderTargetWrapper,
     semaphore: SharedSemaphore,
-    geometry_manager: Arc<GeometryManager>,
     host_subbuffer_alloc: Arc<Mutex<SubbufferAllocator>>,
     exported_textures: Arc<DashMap<HANDLE, ExportedImage>>,
     atlas_manager: Arc<AtlasManager>,
+    terrain: Arc<BuiltSections>,
+    //graphics_pipeline: Arc<GraphicsPipeline>,
+    descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
+    descriptor_sets: Vec<Arc<DescriptorSet>>,
+    state_manager: RenderStateManager,
 }
 
 impl VkBackend {
@@ -129,6 +142,8 @@ impl VkBackend {
                     khr_ray_tracing_pipeline: device_properties.ray_trace,
                     khr_ray_query: device_properties.ray_trace,
                     khr_synchronization2: true,
+                    ext_mesh_shader: true,
+                    ext_descriptor_indexing: true,
                     ..Default::default()
                 },
                 enabled_features: DeviceFeatures {
@@ -136,6 +151,8 @@ impl VkBackend {
                     ray_tracing_pipeline: device_properties.ray_trace,
                     ray_query: device_properties.ray_trace,
                     acceleration_structure: device_properties.ray_trace,
+                    mesh_shader: true,
+                    task_shader: true,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -197,20 +214,49 @@ impl VkBackend {
         ).map_err(|err| anyhow!("backend.rs:error in creating ray tracing pipeline: {:?}", err))?;*/
         /*let graphics_pipeline = GraphicsPipeline::new(device.clone(), None,
             {
-
-                let mut layout = PipelineLayoutCreateInfo::default();
                 let mut info = GraphicsPipelineCreateInfo
-                    ::layout(PipelineLayout::new(device.clone(), layout)
+                    ::layout(PipelineLayout::new(
+                        device.clone(), 
+                        PipelineLayoutCreateInfo {
+                            set_layouts: vec![
+                                DescriptorSetLayout::new(
+                                    device.clone(),
+                                    DescriptorSetLayoutCreateInfo {
+                                        bindings: BTreeMap::from([
+                                            (0, DescriptorSetLayoutBinding {
+                                                stages: ShaderStages::TASK | ShaderStages::MESH | ShaderStages::FRAGMENT,
+                                                ..DescriptorSetLayoutBinding::descriptor_type(DescriptorType::UniformBufferDynamic)
+                                            }),
+                                            (1, DescriptorSetLayoutBinding{ 
+                                                stages: ShaderStages::TASK | ShaderStages::MESH | ShaderStages::FRAGMENT,
+                                                ..DescriptorSetLayoutBinding::descriptor_type(DescriptorType::CombinedImageSampler)
+                                            })
+                                        ]),
+                                        ..Default::default()
+                                    },
+                                ).map_err(|err| anyhow!("backend.rs:error in creating descriptor set layout: {:?}", err))?,
+                            ],
+                            ..Default::default()
+                        })
                     .map_err(|err| anyhow!("backend.rs:error in creating graphics pipeline layout: {:?}", err))?);
+                info.rasterization_state = Some(RasterizationState {
+                    cull_mode: CullMode::Back,
+                    ..Default::default()
+                });
+                info.viewport_state = Some(ViewportState::default());
                 info
             },
         ).map_err(|err| anyhow!("backend.rs:error in creating graphics pipeline: {:?}", err))?;*/
+        let descriptor_set_allocator = Arc::new(StandardDescriptorSetAllocator::new(device.clone(), Default::default()));
+        let descriptor_sets = vec![];
+        
         Ok(VkBackend {
             raw,
             queues,
             device,
             device_properties,
             memory_allocator: memory_allocator.clone(),
+            descriptor_set_allocator,
             command_buffer_allocator,
             size: Arc::new(RwLock::new((0, 0))),
             memory_type_index,
@@ -235,9 +281,8 @@ impl VkBackend {
                     })?,
                 gl_complete: Arc::new(gl_complete),
             },
-            geometry_manager: Arc::new(GeometryManager::new(memory_allocator.clone())),
             host_subbuffer_alloc: Arc::new(Mutex::new(SubbufferAllocator::new(
-                memory_allocator,
+                memory_allocator.clone(),
                 SubbufferAllocatorCreateInfo {
                     buffer_usage: BufferUsage::TRANSFER_SRC,
                     memory_type_filter: MemoryTypeFilter::PREFER_HOST,
@@ -245,20 +290,18 @@ impl VkBackend {
                 },
             ))),
             exported_textures: Arc::new(DashMap::new()),
+            //graphics_pipeline,
             atlas_manager: Arc::new(AtlasManager::new()),
+            terrain: Arc::new(BuiltSections::new(memory_allocator)),
+            descriptor_sets,
+            state_manager: RenderStateManager::default(),
         })
-    }
-
-    #[inline]
-    pub fn render_and_wait(&self) -> Result<()> {
-        Ok(self.render()?.wait(None)?)
     }
 
     pub fn render(&self) -> Result<Arc<Fence>> {
         let target = self.render_target.get_value()?;
-        let mut builder = AutoCommandBufferBuilder::primary(
-            self.command_buffer_allocator.clone(),
-            self.queues.graphics.queue_family_index(),
+        let mut builder = self.allocate_command_buffer(
+            QueueType::Graphics,
             CommandBufferUsage::OneTimeSubmit,
         )?;
         builder
@@ -271,7 +314,14 @@ impl VkBackend {
                 color_attachments: vec![Some(RenderingAttachmentInfo::image_view(target.image_view))],
                 ..Default::default()
             })?
-            .end_rendering()?*/;
+            .bind_pipeline_graphics(self.graphics_pipeline.clone())?
+            .bind_descriptor_sets(
+                vulkano::pipeline::PipelineBindPoint::Graphics,
+                self.graphics_pipeline.layout().clone(),
+                0,
+                self.descriptor_sets.clone(),
+            )?;
+        builder.end_rendering()?*/;
         let command_buffer = builder.build()?;
         let fence = Arc::new(Fence::from_pool(self.device().clone())?);
         self.queues.graphics.with(|mut queue| -> Result<()> {
@@ -294,22 +344,6 @@ impl VkBackend {
         Ok(fence)
     }
 
-    pub fn build_acceleration_structure(&self, geometry_data: GeometryData) -> u64 {
-        self.geometry_manager.add_temporary_geometry(geometry_data)
-    }
-
-    pub fn upload_chunk_mesh(
-        &self,
-        chunk_x: i32,
-        chunk_z: i32,
-        geometry_data: GeometryData,
-    ) -> u64 {
-        // TODO: Implement proper meshopt optimization
-        // TODO: Upload optimized data as StorageBuffer for Mesh Shader
-        // For now, just pass through to geometry manager
-        self.geometry_manager.add_temporary_geometry(geometry_data)
-    }
-
     #[inline]
     pub fn resize(&self, size: (u32, u32)) {
         let mut guard = self.size.write().unwrap();
@@ -322,6 +356,9 @@ impl VkBackend {
             .size
             .read()
             .map_err(|err| anyhow!("backend.rs:error in creating RawImage: {:?}", err))?;
+        if let Ok(target) = self.render_target.get_value() {
+            drop(self.exported_textures.remove(&target.handle));
+        }
         let (image, size, device_memory, handle) = self.create_external_texture(
             ImageUsage::COLOR_ATTACHMENT
                 | ImageUsage::SAMPLED
@@ -329,7 +366,7 @@ impl VkBackend {
                 | ImageUsage::TRANSFER_DST
                 | ImageUsage::TRANSFER_SRC,
             *size,
-            1, // mip_levels: render target typically only needs 1 mip level
+            1
         )?;
         let view = ImageView::new_default(image.clone())
             .map_err(|err| anyhow!("backend.rs:error in creating image view: {:?}", err))?;
@@ -382,27 +419,6 @@ impl VkBackend {
     #[inline]
     pub fn device_properties(&self) -> &DeviceProperties {
         &self.device_properties
-    }
-
-    pub fn transfer_data<L, D: BufferContents + Copy>(
-        &self,
-        data: &[D],
-        target: Subbuffer<[D]>,
-        command_buffer: &mut AutoCommandBufferBuilder<L>,
-    ) -> Result<Subbuffer<[D]>> {
-        let host_subbuffer_alloc = self.host_subbuffer_alloc.lock().map_err(|err| {
-            anyhow!(
-                "backend.rs:error in locking host subbuffer allocator: {:?}",
-                err
-            )
-        })?;
-        let host_buffer = host_subbuffer_alloc.allocate_slice(data.len() as vulkano::DeviceSize)?;
-        {
-            let mut host_content = host_buffer.write()?;
-            host_content.copy_from_slice(data);
-        }
-        command_buffer.copy_buffer(CopyBufferInfo::buffers(host_buffer.clone(), target.clone()))?;
-        Ok(target)
     }
 
     pub fn create_external_texture(
@@ -504,9 +520,27 @@ impl VkBackend {
         self.atlas_manager.sync_atlas(texture, atlas_name, sprites);
     }
 
-    /// Get the atlas manager for external access
-    pub fn atlas_manager(&self) -> Arc<AtlasManager> {
-        self.atlas_manager.clone()
+    pub fn atlas_manager(&self) -> &Arc<AtlasManager> {
+        &self.atlas_manager
+    }
+
+    pub fn terrain_manager(&self) -> &Arc<BuiltSections> {
+        &self.terrain
+    }
+
+    pub fn state_manager(&self) -> &RenderStateManager {
+        &self.state_manager
+    }
+
+    #[inline]
+    pub fn allocate_command_buffer(&self, queue_type: QueueType, usage: CommandBufferUsage) -> Result<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>> {
+        Ok(AutoCommandBufferBuilder::primary(
+            self.command_buffer_allocator.clone(), 
+            match queue_type {
+                QueueType::Graphics => self.queues.graphics.queue_family_index(),
+                QueueType::Compute => self.queues.compute.queue_family_index(),
+                QueueType::Transfer => self.queues.transfer.queue_family_index()
+            }, usage)?)
     }
 }
 
@@ -541,7 +575,13 @@ fn check_physical_device(physical_device: Arc<PhysicalDevice>) -> DeviceProperti
 impl Drop for VkBackend {
     fn drop(&mut self) {
         unsafe { self.device.wait_idle().expect("Error in closing VkBackend") };
-        self.render_target.destroy();
+        let handles: Vec<HANDLE> = self.exported_textures.iter().map(|e| *e.key()).collect();
+        self.exported_textures.clear();
+        for handle in handles {
+            unsafe {
+                // CloseHandle(handle as _);
+            }
+        }
     }
 }
 
@@ -590,6 +630,12 @@ pub struct RenderTarget {
     pub handle: HANDLE,
     pub image: Arc<Image>,
     pub image_view: Arc<ImageView>,
+}
+
+pub enum QueueType {
+    Graphics,
+    Compute,
+    Transfer,
 }
 
 #[derive(Clone)]

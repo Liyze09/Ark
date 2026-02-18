@@ -26,8 +26,7 @@ import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.state.BlockState;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
 import org.jspecify.annotations.NonNull;
@@ -63,7 +62,7 @@ public final class NexusWorldRenderer extends LevelRenderer {
         backend.resize(width, height);
         long r = backend.getGLReady();
         long c = backend.getGLComplete();
-        this.renderer = new ExternalImageRenderer(r, c, backend.getGLTexture(), width, height, backend.getTextureSize());
+        this.renderer = new ExternalImageRenderer(r, c, backend.getGLTexture(), width, height, backend.getRenderTargetSize());
         LOGGER.info("NexusWorldRenderer created.");
     }
 
@@ -75,9 +74,6 @@ public final class NexusWorldRenderer extends LevelRenderer {
     public void close() {
         checkIfClosed();
         super.close();
-        if (builder != null) {
-            builder.close();
-        }
         isClosed = true;
         renderer.cleanup();
         // backend.close();
@@ -159,7 +155,7 @@ public final class NexusWorldRenderer extends LevelRenderer {
         this.height = j;
         backend.resize(width, height);
         this.renderer.cleanup();
-        this.renderer = new ExternalImageRenderer(backend.getGLReady(), backend.getGLComplete(), backend.getGLTexture(), width, height, backend.getTextureSize());
+        this.renderer = new ExternalImageRenderer(backend.getGLReady(), backend.getGLComplete(), backend.getGLTexture(), width, height, backend.getRenderTargetSize());
     }
 
     @Override
@@ -308,12 +304,12 @@ public final class NexusWorldRenderer extends LevelRenderer {
     }
 
     @Override
-    public @NotNull ObjectArrayList<SectionRenderDispatcher.RenderSection> getVisibleSections() {
+    public @NonNull ObjectArrayList<SectionRenderDispatcher.RenderSection> getVisibleSections() {
         return new ObjectArrayList<>();
     }
 
     @Override
-    public @NotNull SectionOcclusionGraph getSectionOcclusionGraph() {
+    public @NonNull SectionOcclusionGraph getSectionOcclusionGraph() {
         return super.getSectionOcclusionGraph();
     }
 
@@ -323,7 +319,7 @@ public final class NexusWorldRenderer extends LevelRenderer {
     }
 
     @Override
-    public @NotNull CloudRenderer getCloudRenderer() {
+    public @NonNull CloudRenderer getCloudRenderer() {
         return super.getCloudRenderer();
     }
 

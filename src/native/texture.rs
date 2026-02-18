@@ -1,6 +1,5 @@
-use dashmap::DashMap;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use vulkano::image::Image;
 
 /// Information about a single sprite within an atlas
@@ -28,13 +27,13 @@ pub struct AtlasInfo {
 /// Manager for atlas textures and their sprite mappings
 #[derive(Clone)]
 pub struct AtlasManager {
-    atlases: Arc<DashMap<String, AtlasInfo>>,
+    pub atlases: Arc<RwLock<HashMap<String, AtlasInfo>>>,
 }
 
 impl AtlasManager {
     pub fn new() -> Self {
         Self {
-            atlases: Arc::new(DashMap::new()),
+            atlases: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -50,17 +49,17 @@ impl AtlasManager {
             atlas_name: atlas_name.clone(),
             sprites,
         };
-        self.atlases.insert(atlas_name, atlas_info);
+        self.atlases.write().unwrap().insert(atlas_name, atlas_info);
     }
 
     /// Get atlas information by texture handle
     pub fn get_atlas(&self, atlas_name: String) -> Option<AtlasInfo> {
-        self.atlases.get(&atlas_name).map(|entry| entry.clone())
+        self.atlases.read().unwrap().get(&atlas_name).cloned()
     }
 
     /// Remove an atlas from management
     pub fn remove_atlas(&self, atlas_name: String) {
-        self.atlases.remove(&atlas_name);
+        self.atlases.write().unwrap().remove(&atlas_name);
     }
 }
 

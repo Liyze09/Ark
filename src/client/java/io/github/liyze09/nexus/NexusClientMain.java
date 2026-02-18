@@ -19,35 +19,34 @@ public class NexusClientMain implements ClientModInitializer {
         System.loadLibrary("nexus");
     }
 
-    public static native long initNative();
+    static native long initNative();
 
-    public static native void render(long ctx);
+    static native void render(long ctx);
 
-    public static native void close(long ctx);
+    static native void close(long ctx);
 
-    public static native long getTextureSize(long ctx);
+    static native long getTextureSize(long ctx);
 
-    public static native void resize(long ctx, int width, int height);
+    static native void resize(long ctx, int width, int height);
 
-    public static native long getGLReady(long ctx);
+    static native long getGLReady(long ctx);
 
-    public static native long getGLComplete(long ctx);
+    static native long getGLComplete(long ctx);
 
-    public static native long getGLTexture(long ctx);
+    static native long getGLTexture(long ctx);
 
-    public static native long acquireVulkanTexture(long ctx, int width, int height, int mipLevels);
+    static native long acquireVulkanTexture(long ctx, int width, int height, int mipLevels);
 
-    public static native long getVulkanTextureSize(long ctx, long handle);
+    static native long getVulkanTextureSize(long ctx, long handle);
 
-    public static native void syncAtlas(long ctx, long textureHandle, String atlasName,
+    static native void syncTerrainData(long ctx, long header, long dataAddress, long dataSize);
+
+    static native void syncAtlas(long ctx, long textureHandle, String atlasName,
                                         String[] spriteNames,
                                         int[] spriteX, int[] spriteY,
                                         int[] spriteWidth, int[] spriteHeight,
                                         float[] spriteU0, float[] spriteV0,
                                         float[] spriteU1, float[] spriteV1);
-
-    public static native void uploadChunkMesh(long ctx, int chunkX, int chunkZ,
-                                              float[] vertices, int[] indices);
 
     @Override
     public void onInitializeClient() {
