@@ -1,5 +1,17 @@
 module common; 
 
+public struct Vertex {
+    public float3 position;
+    public uint materialID;
+};
+
+public struct MeshletDesc {
+    public uint vertexOffset;
+    public uint indexOffset;
+    public uint vertexCount;
+    public uint primitiveCount;
+};
+
 public struct SectionHeader {
     private uint64_t flag;
     public int offset;
@@ -47,7 +59,9 @@ public struct SparseBlock {
     static const uint SOUTH = 3; // bit3
     static const uint EAST = 4;  // bit4
     static const uint WEST = 5;  // bit5
-
+    public property uint8_t faceMask { get {
+        return (bytes[1] & 0xF) | ((bytes[2] >> 6) << 4);
+    }}
     public property bool up { get {
         uint8_t mask = (bytes[1] & 0xF) | ((bytes[2] >> 6) << 4);
         return (mask & (1u << UP)) != 0;

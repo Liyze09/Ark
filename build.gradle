@@ -68,9 +68,19 @@ processResources {
 	output.inputReader().lines().forEach {
 		println(it)
 	}*/
-	def target = new File("${project.projectDir}/build/resources/client/nexus.dll")
-	target.parentFile.mkdirs()
-	Files.copy(new File("${project.projectDir}/target/release/nexus.dll").toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+	def source_dll = new File("${project.projectDir}/target/release/nexus.dll")
+	def source_so = new File("${project.projectDir}/target/release/libnexus.so")
+	def source_dll_d = new File("${project.projectDir}/target/debug/nexus.dll")
+	def source_so_d = new File("${project.projectDir}/target/debug/libnexus.so")
+	def target_dll = new File("${project.projectDir}/build/resources/client/nexus.dll")
+	def target_so = new File("${project.projectDir}/build/resources/client/libnexus.so")
+	target_dll.parentFile.mkdirs()
+	if (source_dll.exists()) {
+		Files.copy(source_dll.toPath(), target_dll.toPath(), StandardCopyOption.REPLACE_EXISTING);
+	}
+	if (source_so.exists()) {
+		Files.copy(source_dll.toPath(), target_dll.toPath(), StandardCopyOption.REPLACE_EXISTING);
+	}
 }
 tasks.withType(JavaCompile).configureEach {
 	it.options.release = 25

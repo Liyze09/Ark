@@ -15,6 +15,8 @@ use vulkano::pipeline::graphics::rasterization::{CullMode, RasterizationState};
 use vulkano::pipeline::graphics::viewport::ViewportState;
 use vulkano::shader::ShaderStages;
 use std::collections::{BTreeMap, HashMap};
+#[cfg(unix)]
+use std::os::fd::{AsFd, AsRawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::thread;
@@ -475,10 +477,12 @@ impl VkBackend {
             handle_type: ExternalMemoryHandleTypeFlags::OPAQUE_WIN32,
             ..Default::default()
         };
+        #[cfg(windows)]
         let handle = unsafe {
-            self.raw.ext_device.get_memory_win32_handle(&info)
-                .map_err(|err| anyhow!("backend.rs:create_external_memory:error in getting external memory handle: {:?}", err))?
+            self.raw.ext_device.get_memory_win32_handle(&info).map_err(|err| anyhow!("backend.rs:create_external_memory:error in getting external memory handle: {:?}", err))?
         };
+        #[cfg(unix)]
+        let handle = device_memory.export_fd(vulkano::memory::ExternalMemoryHandleType::OpaqueFd)?.as_raw_fd() as isize;
         self.exported_textures.insert(
             handle,
             ExportedImage {
@@ -588,6 +592,7 @@ impl Drop for VkBackend {
 #[derive(Clone)]
 struct Raw {
     vk_instance: ash::Instance,
+    #[cfg(windows)]
     ext_device: ash::khr::external_memory_win32::Device,
     vk_device: ash::Device,
 }
@@ -604,6 +609,7 @@ impl Raw {
             fns.v1_3.clone(),
         );
         let fns = device.fns();
+        
         let vk_device = ash::Device::from_parts_1_3(
             vk_raw_device,
             fns.v1_0.clone(),
@@ -612,10 +618,12 @@ impl Raw {
             fns.v1_3.clone(),
         );
 
+        #[cfg(windows)]
         let ext_device = ash::khr::external_memory_win32::Device::new(&vk_instance, &vk_device);
         Ok(Raw {
             vk_device,
             vk_instance,
+            #[cfg(windows)]
             ext_device,
         })
     }
@@ -743,6 +751,7 @@ impl RenderTargetWrapper {
             let handle = value.handle;
             drop(value);
             unsafe {
+                #[cfg(windows)]
                 CloseHandle(handle as _);
             }
         }
