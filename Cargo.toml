@@ -8,12 +8,10 @@ crate-type = ["cdylib"]
 path = "src/native/lib.rs"
 
 [dependencies]
-jni = "0.22.4"
 vulkanalia = { version = "0.35.0", features = ["libloading", "provisional"] }
 vulkanalia-vma = "0.9.0"
 anyhow = "1.0.102"
 rayon = "1.12.0"
-windows-sys = { version = "0.61.2", features = ["Win32"] }
 mimalloc = "0.1.50"
 zip = "8.6.0"
 wasmtime = "44.0.1"

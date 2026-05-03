@@ -1,0 +1,85 @@
+name: Java Rust Hybrid Build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build-rust:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            lib-ext: dll
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            lib-ext: so
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            lib-ext: dylib
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v6
+
+      - name: setup rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "rust-cache"
+
+      - name: Build Rust dynamic library
+        run: |
+          cargo build --release --target ${{ matrix.target }}
+        shell: bash
+
+      - name: Collect Rust artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp ./target/${{ matrix.target }}/release/*.${{ matrix.lib-ext }} artifacts/ || true
+          echo "Rust artifacts:"
+          ls -R artifacts/
+
+      - name: capture build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ matrix.target }}
+          path: artifacts/*
+
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v6
+
+      - name: validate gradle wrapper
+        uses: gradle/actions/wrapper-validation@v6
+
+      - name: setup jdk
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'microsoft'
+
+      - name: make gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: build
+        run: ./gradlew build
+
+      - name: capture build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: jars
+          path: build/libs/
