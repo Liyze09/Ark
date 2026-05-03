@@ -1,0 +1,7 @@
+accessWidener v2 official
+
+accessible class net/minecraft/world/level/chunk/storage/IOWorker$PendingStore
+accessible method net/minecraft/world/level/chunk/storage/IOWorker$PendingStore copyData ()Lnet/minecraft/nbt/CompoundTag;
+accessible field net/minecraft/world/level/chunk/storage/IOWorker$PendingStore data Lnet/minecraft/nbt/CompoundTag;
+
+accessible method net/minecraft/world/level/chunk/storage/RegionFileStorage getRegionFile (Lnet/minecraft/world/level/ChunkPos;)Lnet/minecraft/world/level/chunk/storage/RegionFile;

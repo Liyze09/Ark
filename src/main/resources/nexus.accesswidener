@@ -1,8 +1,0 @@
-accessWidener v2 named
-mutable field net/minecraft/client/Minecraft levelRenderer Lnet/minecraft/client/renderer/LevelRenderer;
-accessible field net/minecraft/client/Minecraft renderBuffers Lnet/minecraft/client/renderer/RenderBuffers;
-accessible field net/minecraft/client/multiplayer/ClientChunkCache$Storage chunks Ljava/util/concurrent/atomic/AtomicReferenceArray;
-accessible field net/minecraft/client/multiplayer/ClientChunkCache storage Lnet/minecraft/client/multiplayer/ClientChunkCache$Storage;
-accessible field net/minecraft/client/renderer/LevelRenderer targets Lnet/minecraft/client/renderer/LevelTargetBundle;
-accessible field com/mojang/blaze3d/pipeline/RenderTarget colorTexture Lcom/mojang/blaze3d/textures/GpuTexture;
-accessible field com/mojang/blaze3d/pipeline/RenderTarget colorTextureView Lcom/mojang/blaze3d/textures/GpuTextureView;

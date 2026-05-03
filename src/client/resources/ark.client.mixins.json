@@ -1,0 +1,16 @@
+{
+  "required": true,
+  "package": "io.github.liyze09.ark.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "mixins": [
+    "GpuDeviceAccessor",
+    "IOWorkerAccessor",
+    "RegionFileStorageAccessor",
+    "SimpleRegionStorageAccessor",
+    "VulkanBackendMixin",
+    "VulkanPhysicalDeviceAccessor"
+  ]
+}
