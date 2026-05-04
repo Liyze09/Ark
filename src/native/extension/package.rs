@@ -1,4 +1,9 @@
-use std::{borrow::Cow, collections::HashMap, fmt::Display, io::{Cursor, Read}};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    fmt::Display,
+    io::{Cursor, Read},
+};
 
 use serde::Deserialize;
 
@@ -32,7 +37,7 @@ pub fn parse_package(zip: &[u8]) -> anyhow::Result<ExtensionPackage> {
 }
 
 #[derive(Debug)]
-pub struct  ExtensionPackage {
+pub struct ExtensionPackage {
     pub manifest: ExtensionManifest,
     pub files: HashMap<String, Cow<'static, [u8]>>,
 }
@@ -40,11 +45,11 @@ pub struct  ExtensionPackage {
 #[derive(Debug, Deserialize)]
 pub struct ExtensionManifest {
     pub id: String,
-    #[serde(default="default_namespace")]
+    #[serde(default = "default_namespace")]
     pub namespaces: String,
-    #[serde(default="default_entrypoint")]
+    #[serde(default = "default_entrypoint")]
     pub entrypoint: String,
-    #[serde(default="default_entry_function")]
+    #[serde(default = "default_entry_function")]
     pub entry_function: String,
     #[serde(default)]
     pub runtime: RuntimeArgs,
@@ -54,7 +59,7 @@ pub struct ExtensionManifest {
     pub icon: Option<String>,
     pub license: Option<ValueOrList>,
     pub author: Option<ValueOrList>,
-    pub contributors:Option<ValueOrList>,
+    pub contributors: Option<ValueOrList>,
     pub contact: Option<HashMap<String, String>>,
     pub custom: Option<HashMap<String, String>>,
 }
@@ -86,9 +91,7 @@ pub struct RuntimeArgs {
     #[serde(default)]
     pub optional_vulkan_features: Vec<String>,
     #[serde(default)]
-    pub required_wasi_features: Vec<String>,
-    #[serde(default)]
-    pub optional_wasi_features: Vec<String>
+    pub optional_wasi_features: Vec<String>,
 }
 
 impl Default for RuntimeArgs {
@@ -100,8 +103,7 @@ impl Default for RuntimeArgs {
             optional_vulkan_extensions: vec![],
             required_vulkan_features: vec![],
             optional_vulkan_features: vec![],
-            required_wasi_features: vec![],
-            optional_wasi_features: vec![]
+            optional_wasi_features: vec![],
         }
     }
 }
@@ -128,7 +130,11 @@ pub fn parse_vulkan_version(version: &str) -> anyhow::Result<vulkanalia::Version
     if parts.len() != 3 {
         return Err(anyhow::anyhow!("Invalid Vulkan version: {}", version));
     }
-    Ok(vulkanalia::Version::new(parts[0].parse()?, parts[1].parse()?, parts[2].parse()?))
+    Ok(vulkanalia::Version::new(
+        parts[0].parse()?,
+        parts[1].parse()?,
+        parts[2].parse()?,
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -157,7 +163,11 @@ impl ExtensionIdentifier {
     }
 
     pub fn from_manifest(manifest: &ExtensionManifest) -> Self {
-        Self::new(&manifest.id, &manifest.namespaces, manifest.version.as_deref())
+        Self::new(
+            &manifest.id,
+            &manifest.namespaces,
+            manifest.version.as_deref(),
+        )
     }
 }
 

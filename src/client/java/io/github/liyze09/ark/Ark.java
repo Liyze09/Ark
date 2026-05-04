@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 public class Ark implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger(Ark.class);
     private static ExtensionLoader loader;
+    private static NativeContext nativeContext;
 
     public static ExtensionLoader getExtensionLoader() {
         if (loader == null) {
@@ -18,8 +19,6 @@ public class Ark implements ClientModInitializer {
         }
         return loader;
     }
-
-    private static NativeContext nativeContext;
 
     public static NativeContext getNativeContext() {
         return nativeContext;
@@ -42,9 +41,9 @@ public class Ark implements ClientModInitializer {
         var transferQueue = backend.transferQueue().vkQueue().address();
 
         nativeContext = NativeContext.create(
-            vkInstance, vkDevice, vma,
-            transferQueue, graphicsQueue, computeQueue,
-            ExtensionLoader.extensionPath
+                vkInstance, vkDevice, vma,
+                transferQueue, graphicsQueue, computeQueue,
+                ExtensionLoader.extensionPath
         );
 
         LOGGER.info("Native context created: 0x{}", nativeContext);

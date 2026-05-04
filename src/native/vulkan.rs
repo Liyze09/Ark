@@ -1,4 +1,4 @@
-use vulkanalia::{Entry, vk};
+use vulkanalia::{vk, Entry};
 use vulkanalia_vma::vma::VmaAllocator;
 
 pub struct VkBackend {
@@ -11,6 +11,4 @@ pub struct VkBackend {
     pub transfer_queue: vk::Queue,
 }
 
-impl VkBackend {
-
-}
+impl VkBackend {}
