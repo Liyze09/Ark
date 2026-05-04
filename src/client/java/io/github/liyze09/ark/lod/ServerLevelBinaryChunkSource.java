@@ -119,6 +119,7 @@ public class ServerLevelBinaryChunkSource implements BinaryChunkSource {
         }
 
         @Override
-        public void close() {}
+        public void close() {
+        }
     }
 }

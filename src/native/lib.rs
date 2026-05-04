@@ -1,16 +1,22 @@
-pub mod vulkan;
-pub mod shaders;
 pub mod extension;
+pub mod shaders;
+pub mod vulkan;
 
 use std::ffi::{CStr, CString};
 use std::sync::Mutex;
 
 use anyhow::anyhow;
 use mimalloc::MiMalloc;
-use vulkanalia::{Entry, loader::{LIBRARY, LibloadingLoader}, vk};
+use vulkanalia::{
+    loader::{LibloadingLoader, LIBRARY},
+    vk, Entry,
+};
 use vulkanalia_vma::vma::VmaAllocator;
 
-use crate::{extension::wasm::WasmRuntime, vulkan::VkBackend};
+use crate::{
+    extension::wasm::{LaunchArgs, WasmRuntime},
+    vulkan::VkBackend,
+};
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -42,9 +48,9 @@ impl NativeContext {
             vma,
             transfer_queue,
             graphics_queue,
-            compute_queue
+            compute_queue,
         };
-        Ok( Self {
+        Ok(Self {
             vulkan_backend,
             wasm_runtime: WasmRuntime::new(extension_folder),
             errors: Mutex::new(Vec::new()),
@@ -82,7 +88,9 @@ pub unsafe extern "C" fn ark_create_native_context(
     let folder = if extension_folder.is_null() {
         String::new()
     } else {
-        unsafe { CStr::from_ptr(extension_folder) }.to_string_lossy().into_owned()
+        unsafe { CStr::from_ptr(extension_folder) }
+            .to_string_lossy()
+            .into_owned()
     };
     let result = unsafe {
         NativeContext::new(
@@ -118,10 +126,64 @@ pub unsafe extern "C" fn ark_destroy_native_context(ptr: i64) {
 
 /// # Safety
 /// `ptr` must be a pointer previously returned by `ark_create_native_context`.
-/// `file_name` must be a valid C string.
-pub unsafe extern "C" fn ark_load_extension_file(ptr: i64, file_name: *const std::ffi::c_char) -> i32 {
+/// `file_name` and `wasi_features_json` must be valid C strings (or null).
+/// `wasi_features_json` is a JSON array of WASI feature strings, e.g. `["fs:./data"]`.
+/// Returns 0 on success, 1 on failure (use `ark_pop_error` to retrieve the error).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ark_load_extension(
+    ptr: i64,
+    file_name: *const std::ffi::c_char,
+    wasi_features_json: *const std::ffi::c_char,
+) -> i32 {
     let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
-    match ctx.wasm_runtime.load_extension(unsafe { CStr::from_ptr(file_name) }.to_string_lossy().as_ref()) {
+    let file_name = unsafe { CStr::from_ptr(file_name) }.to_string_lossy();
+    let wasi_features: Vec<String> = if wasi_features_json.is_null() {
+        Vec::new()
+    } else {
+        let json = unsafe { CStr::from_ptr(wasi_features_json) }.to_string_lossy();
+        match serde_json::from_str(&json) {
+            Ok(v) => v,
+            Err(e) => {
+                ctx.push_error(anyhow::anyhow!("Failed to parse wasi_features JSON: {}", e));
+                return 1;
+            }
+        }
+    };
+    match ctx.wasm_runtime.load_extension(
+        file_name.as_ref(),
+        LaunchArgs { enabled_wasi_features: wasi_features, ..Default::default() },
+    ) {
+        Ok(_) => 0,
+        Err(e) => {
+            ctx.push_error(e);
+            1
+        }
+    }
+}
+
+/// # Safety
+/// `ptr` must be a pointer previously returned by `ark_create_native_context`.
+/// `id` must be a valid C string. Returns 0 on success, 1 on failure.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ark_initialize_extension(ptr: i64, id: *const std::ffi::c_char) -> i32 {
+    let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
+    let id = unsafe { CStr::from_ptr(id) }.to_string_lossy();
+    match ctx.wasm_runtime.initialize_extension(&id) {
+        Ok(_) => 0,
+        Err(e) => {
+            ctx.push_error(e);
+            1
+        }
+    }
+}
+
+/// # Safety
+/// `ptr` must be a pointer previously returned by `ark_create_native_context`.
+/// Returns 0 on success, 1 on failure.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ark_initialize_extensions(ptr: i64) -> i32 {
+    let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
+    match ctx.wasm_runtime.initialize_extensions() {
         Ok(_) => 0,
         Err(e) => {
             ctx.push_error(e);
@@ -140,7 +202,9 @@ pub unsafe extern "C" fn ark_pop_error(ptr: i64) -> *mut std::ffi::c_char {
     match ctx.pop_error() {
         Some(err) => {
             let msg = format!("{err:#}");
-            CString::new(msg).unwrap_or_else(|_| CString::new("error contains nul byte").unwrap()).into_raw()
+            CString::new(msg)
+                .unwrap_or_else(|_| CString::new("error contains nul byte").unwrap())
+                .into_raw()
         }
         None => std::ptr::null_mut(),
     }
@@ -162,4 +226,3 @@ pub unsafe extern "C" fn ark_free_string(ptr: *mut std::ffi::c_char) {
         drop(unsafe { CString::from_raw(ptr) });
     }
 }
-

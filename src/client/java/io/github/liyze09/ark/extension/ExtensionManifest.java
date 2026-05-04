@@ -1,10 +1,15 @@
 package io.github.liyze09.ark.extension;
 
-import java.lang.reflect.Type;
-import java.util.*;
-
-import com.google.gson.*;
+import com.google.gson.JsonDeserializationContext;
+import com.google.gson.JsonDeserializer;
+import com.google.gson.JsonElement;
 import org.jspecify.annotations.NonNull;
+
+import java.lang.reflect.Type;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @SuppressWarnings("unused")
 public class ExtensionManifest {
@@ -23,6 +28,14 @@ public class ExtensionManifest {
     public Map<String, String> contact = new HashMap<>(0);
     public Map<String, String> custom = new HashMap<>(0);
 
+    public void verify() {
+        if (id == null) {
+            throw new IllegalArgumentException("Extension must have a 'id' field in manifest.json");
+        } else {
+            name = id;
+        }
+    }
+
     public static class RuntimeArgs {
         public String required_vulkan_version = "1.2.0";
         public String required_ark_version = "0.1.0";
@@ -30,16 +43,7 @@ public class ExtensionManifest {
         public List<String> optional_vulkan_extensions = List.of();
         public List<String> required_vulkan_features = List.of();
         public List<String> optional_vulkan_features = List.of();
-        public List<String> required_wasi_features = List.of();
         public List<String> optional_wasi_features = List.of();
-    }
-
-    public void verify() {
-        if (id == null) {
-            throw new IllegalArgumentException("Extension must have a 'id' field in manifest.json");
-        } else {
-            name = id;
-        }
     }
 
     public static class ValueOrList {
@@ -56,9 +60,12 @@ public class ExtensionManifest {
             this.value = null;
         }
 
-        public ValueOrList() {}
+        public ValueOrList() {
+        }
 
-        public boolean isSingle() { return value != null; }
+        public boolean isSingle() {
+            return value != null;
+        }
 
         public String asString() {
             return isSingle() ? value : String.join(", ", list);
