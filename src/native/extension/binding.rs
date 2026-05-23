@@ -1,7 +1,7 @@
-use wasmtime::{
-    AsContextMut,
-    component::{Access, Linker, TypedFunc, bindgen},
-};
+pub mod entry;
+use wasmtime::
+    component::{Access, Linker, bindgen}
+;
 
 use crate::extension::{binding::ark::core::logging::{Level}, wasm::ExtensionContext};
 
@@ -65,22 +65,15 @@ impl CoreImportsWithStore for ExtensionContext {
     fn register<T>(
         mut host: Access<'_, T, Self>,
         trigger: String,
-        function: String,
     ) -> Result<(), String> {
         let data = host.get();
         let id = data.package.manifest.id.clone();
-        let registry = data.public_registry.clone();
-        let instance = data
-            .instance
-            .ok_or(wasmtime::Error::msg("Instance not found"))
-            .map_err(|err| err.to_string())?;
-        let fun: TypedFunc<(), ()> = instance
-            .get_typed_func(host.as_context_mut(), function)
-            .map_err(|err| err.to_string())?;
-        registry
-            .lock()
-            .map_err(|err| err.to_string())?
-            .insert(trigger, (fun, id));
+        let mut registry = data.public_registry.lock();
+        if let Some(value) = registry.get_mut(&trigger) {
+            value.push(id);
+        } else {
+            registry.insert(trigger, vec![id]);
+        }
         Ok(())
     }
 }
@@ -89,12 +82,12 @@ impl CoreImports for ExtensionContext {
     fn check_vulkan_feature(&mut self, feature: String) -> bool {
         self.enabled_vulkan_features
             .lock()
-            .is_ok_and(|s| s.contains(&feature))
+            .contains(&feature)
     }
 
     fn check_vulkan_extension(&mut self, extension: String) -> bool {
         self.enabled_vulkan_extensions
             .lock()
-            .is_ok_and(|s| s.contains(&extension))
+            .contains(&extension)
     }
 }

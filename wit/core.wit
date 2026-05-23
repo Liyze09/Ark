@@ -17,7 +17,7 @@ interface logging {
 }
 
 world core {
-    import register: func(trigger: string, function: string) -> result<_, string>;
+    import register: func(trigger: string) -> result<_, string>;
     import check-vulkan-feature: func(feature: string) -> bool;
     import check-vulkan-extension: func(extension: string) -> bool;
     import logging;

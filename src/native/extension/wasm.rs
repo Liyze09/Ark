@@ -2,14 +2,15 @@ use std::{
     collections::{HashMap, HashSet},
     net::{IpAddr, SocketAddr, ToSocketAddrs},
     path::{self, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
-use anyhow::anyhow;
-use log::error;
+use log::warn;
+use parking_lot::Mutex;
+use thiserror::Error;
 use wasmtime::{
-    Cache, CacheConfig, Config, Engine, Store,
-    component::{Component, HasData, Instance, Linker, TypedFunc},
+    Cache, CacheConfig, Config, Engine, Store, Trap, WasmCoreDump,
+    component::{Component, HasData, Linker},
 };
 use wasmtime_wasi::{
     DirPerms, FilePerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView,
@@ -17,11 +18,61 @@ use wasmtime_wasi::{
 
 use crate::{
     extension::{
-        binding,
+        binding::{self, entry::Entry},
         package::{ExtensionPackage, parse_package},
     },
     vulkan::VkBackend,
 };
+
+#[derive(Debug, Error)]
+pub enum ExtensionError {
+    /// WASM trap from inside the extension — inspect with
+    /// `source.downcast_ref::<wasmtime::Trap>()` to obtain the
+    /// [`wasmtime::Trap`] (trap code, backtrace, etc.).
+    #[error("WASM trap in extension '{id}': {source}")]
+    WasmTrap {
+        id: String,
+        #[source]
+        source: wasmtime::Error,
+    },
+    /// Host-side runtime error (I/O, parsing, locking, extension-not-found, etc.)
+    #[error("{0}")]
+    Runtime(#[from] anyhow::Error),
+    /// Multiple extensions failed during batch initialization.
+    #[error("{count} error(s) occurred: {errors:?}")]
+    Multi { count: usize, errors: Vec<ExtensionError> },
+}
+
+impl ExtensionError {
+    /// Wrap a [`wasmtime::Error`], distinguishing WASM traps from host errors.
+    fn from_wasmtime(err: wasmtime::Error, ext_id: &str) -> Self {
+        if err.downcast_ref::<Trap>().is_some() {
+            Self::WasmTrap { id: ext_id.to_string(), source: err }
+        } else {
+            Self::Runtime(err.into())
+        }
+    }
+
+    /// Extract the [`WasmCoreDump`] from a trap error, if one was captured.
+    ///
+    /// Core dumps are only produced when
+    /// [`Config::coredump_on_trap`](wasmtime::Config::coredump_on_trap) is
+    /// enabled and a WASM trap actually occurs.  The dump lives as context
+    /// on the [`wasmtime::Error`] — use `source.downcast_ref::<WasmCoreDump>()`
+    /// rather than looking for it on the [`Trap`][crate::Trap] directly.
+    pub fn coredump(&self) -> Option<&WasmCoreDump> {
+        match self {
+            Self::WasmTrap { source, .. } => source.downcast_ref::<WasmCoreDump>(),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for ExtensionError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Runtime(e.into())
+    }
+}
 
 pub struct WasmRuntime {
     pub engine: Engine,
@@ -34,18 +85,16 @@ pub struct WasmRuntime {
     pub enabled_vulkan_extensions: Arc<Mutex<HashSet<String>>>,
 }
 
-type LoadedExtensions = Arc<Mutex<HashMap<String, (Store<ExtensionContext>, Instance)>>>;
+type LoadedExtensions = Arc<Mutex<HashMap<String, (Store<ExtensionContext>, Entry)>>>;
 
-type Registry = Arc<Mutex<HashMap<String, (TypedFunc<(), ()>, String)>>>;
+type Registry = Arc<Mutex<HashMap<String, Vec<String>>>>;
 
 static CACHE_PATH: &str = "./cache/ark/";
 
 pub struct ExtensionContext {
     pub package: ExtensionPackage,
-    pub wasm_component: Component,
     pub wasi_ctx: WasiCtx,
     pub table: ResourceTable,
-    pub instance: Option<Instance>,
     pub public_registry: Registry,
     pub enabled_vulkan_features: Arc<Mutex<HashSet<String>>>,
     pub enabled_vulkan_extensions: Arc<Mutex<HashSet<String>>>,
@@ -64,6 +113,7 @@ impl WasmRuntime {
         cache_config.with_directory(cache_file);
         let cache = Cache::new(cache_config)?;
         config.cache(Some(cache));
+        config.coredump_on_trap(true);
 
         let engine = Engine::new(&config)?;
         let mut linker = Linker::<ExtensionContext>::new(&engine);
@@ -81,22 +131,22 @@ impl WasmRuntime {
         })
     }
 
-    pub fn load_extension(&self, file_name: &str, args: LaunchArgs) -> anyhow::Result<()> {
+    pub fn load_extension(&self, file_name: &str, args: LaunchArgs) -> Result<(), ExtensionError> {
         let path = PathBuf::new().join(&self.extension_folder).join(file_name);
         let bytes = std::fs::read(path)?;
-        self.load_extension_by_bytes(&bytes, args)?;
-        Ok(())
+        self.load_extension_by_bytes(&bytes, args)
     }
 
-    pub fn load_extension_by_bytes(&self, bytes: &[u8], args: LaunchArgs) -> anyhow::Result<()> {
+    pub fn load_extension_by_bytes(&self, bytes: &[u8], args: LaunchArgs) -> Result<(), ExtensionError> {
         let package = parse_package(bytes)?;
         let wasm_bytes = package
             .files
             .get(package.manifest.entrypoint.as_str())
-            .ok_or(anyhow::anyhow!(
-                "Failed to find entrance wasm file in package"
+            .ok_or_else(|| anyhow::anyhow!(
+                "Failed to find entrypoint wasm file in package"
             ))?;
-        let wasm_component = Component::from_binary(&self.engine, wasm_bytes)?;
+        let wasm_component = Component::from_binary(&self.engine, wasm_bytes)
+            .map_err(|e| ExtensionError::from_wasmtime(e, &package.manifest.id))?;
 
         let mut wasi_builder = WasiCtxBuilder::new();
         wasi_builder.allow_blocking_current_thread(true);
@@ -113,16 +163,14 @@ impl WasmRuntime {
                         &guest_path,
                         DirPerms::all(),
                         FilePerms::all(),
-                    )?;
+                    ).map_err(|e| ExtensionError::Runtime(e.into()))?;
                 }
                 WasiFeature::Network { addrs } => network_addrs.extend(addrs),
-                WasiFeature::IpNameLookup => {
-                    wasi_builder.allow_ip_name_lookup(true);
-                }
             }
         }
 
         if !network_addrs.is_empty() {
+            wasi_builder.allow_ip_name_lookup(true);
             let allowed = Arc::new(network_addrs);
             wasi_builder.socket_addr_check(move |addr, _use| {
                 let allowed = Arc::clone(&allowed);
@@ -138,87 +186,120 @@ impl WasmRuntime {
             &self.engine,
             ExtensionContext {
                 package,
-                wasm_component: wasm_component.clone(),
                 wasi_ctx: wasi_builder.build(),
                 table: ResourceTable::new(),
-                instance: None,
                 public_registry: self.registry.clone(),
                 enabled_vulkan_features: self.enabled_vulkan_features.clone(),
                 enabled_vulkan_extensions: self.enabled_vulkan_extensions.clone(),
             },
         );
-        let instance = self.linker.instantiate(&mut store, &wasm_component)?;
-        store.data_mut().instance = Some(instance);
-        let mut loaded_extensions = self.loaded_extensions.lock().unwrap();
-        loaded_extensions.insert(store.data().package.manifest.id.clone(), (store, instance));
+        let ext_id = store.data().package.manifest.id.clone();
+        let mut loaded_extensions = self.loaded_extensions
+            .lock();
+        let entry = Entry::instantiate(&mut store, &wasm_component, &self.linker)
+            .map_err(|e| ExtensionError::from_wasmtime(e, &ext_id))?;
+        loaded_extensions.insert(ext_id, (store, entry));
         Ok(())
     }
 
-    pub fn initialize_extension(&self, id: &str) -> anyhow::Result<()> {
-        let mut binding = self.loaded_extensions.lock().unwrap();
-        let (store, instance) = binding
+    pub fn initialize_extension(&self, id: &str) -> Result<(), ExtensionError> {
+        let mut loaded = self
+            .loaded_extensions
+            .lock();
+        let (store, entry) = loaded
             .get_mut(id)
-            .ok_or(anyhow::anyhow!("Failed to find extension with id: {}", id))?;
-        let fun_name = store.data().package.manifest.entry_function.clone();
-        if let Some(fun) = instance.get_func(&mut *store, &fun_name) {
-            fun.call(store, &[], &mut [])?;
+            .ok_or_else(|| anyhow::anyhow!("Extension not found: {id}"))?;
+        entry.ark_core_entrance().call_on_init(store)
+            .map_err(|e| ExtensionError::from_wasmtime(e, id))?;
+        Ok(())
+    }
+
+    pub fn initialize_extensions(&self) -> Result<(), ExtensionError> {
+        // Collect IDs first so we do not hold the lock while calling into WASM.
+        let ids: Vec<String> = {
+            let loaded = self
+                .loaded_extensions
+                .lock();
+            loaded.keys().cloned().collect()
+        };
+
+        let errors: Vec<ExtensionError> = ids
+            .iter()
+            .filter_map(|id| self.initialize_extension(id).err())
+            .collect();
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ExtensionError::Multi { count: errors.len(), errors })
         }
-        Ok(())
     }
 
-    pub fn initialize_extensions(&self) -> anyhow::Result<()> {
-        self.loaded_extensions
-            .lock()
-            .unwrap()
-            .iter_mut()
-            .for_each(|(_name, (store, instance))| {
-                let fun_name = store.data().package.manifest.entry_function.clone();
-                if let Some(fun) = instance.get_func(&mut *store, &fun_name) {
-                    let result = fun.call(store, &[], &mut []);
-                    if let Err(result) = result {
-                        error!("Failed to initialize extension: {:?}", result)
-                    }
-                };
-            });
-        Ok(())
-    }
-
-    pub fn disable_extension(&self, id: &str) -> anyhow::Result<()> {
-        let mut binding = self.loaded_extensions.lock().unwrap();
-        let (store, instance) = binding
+    pub fn disable_extension(&self, id: &str) -> Result<(), ExtensionError> {
+        let mut loaded = self
+            .loaded_extensions
+            .lock();
+        let (store, entry) = loaded
             .get_mut(id)
-            .ok_or(anyhow::anyhow!("Extension not found: {}", id))?;
-        self.disable_inner(store, instance, id)
+            .ok_or_else(|| anyhow::anyhow!("Extension not found: {id}"))?;
+        self.disable_inner(store, entry, id)
     }
 
     fn disable_inner(
         &self,
         store: &mut Store<ExtensionContext>,
-        instance: &mut Instance,
+        entry: &mut Entry,
         id: &str,
-    ) -> anyhow::Result<()> {
-        self.registry
-            .lock()
-            .unwrap()
-            .retain(|_, (_, ext_id)| ext_id != id);
-        if let Some(close_fn) = &store.data().package.manifest.close_function {
-            let close_fn = close_fn.clone();
-            if let Some(fun) = instance.get_func(&mut *store, close_fn) {
-                fun.call(store, &[], &mut [])?;
-            }
-        }
+    ) -> Result<(), ExtensionError> {
+        // Remove this extension from all trigger registries.
+        {
+            let mut registry = self
+                .registry
+                .lock();
+            registry.iter_mut().for_each(|(_trigger, entries)| {
+                if let Some(pos) = entries.iter().position(|v| v == id) {
+                    entries.swap_remove(pos);
+                }
+            });
+        } // registry lock released before calling into WASM
+
+        entry.ark_core_entrance().call_on_destroy(store)
+            .map_err(|e| ExtensionError::from_wasmtime(e, id))?;
         Ok(())
     }
 
-    pub fn unload_extension(&self, id: &str) -> anyhow::Result<()> {
-        let mut binding = self
+    pub fn unload_extension(&self, id: &str) -> Result<(), ExtensionError> {
+        let mut loaded = self
             .loaded_extensions
-            .lock()
-            .map_err(|err| anyhow!("Failed to lock loaded extensions: {}", err))?;
-        if let Some((store, instance)) = binding.get_mut(id) {
+            .lock();
+        if let Some((store, instance)) = loaded.get_mut(id) {
             self.disable_inner(store, instance, id)?;
         }
-        binding.remove(id);
+        loaded.remove(id);
+        Ok(())
+    }
+
+    pub fn trigger_extension(&self, trigger: &str) -> Result<(), ExtensionError> {
+        // Collect IDs under the registry lock, then release before calling into
+        // WASM to avoid a lock-ordering deadlock (registry → loaded_extensions → registry).
+        let ids: Vec<String> = {
+            let registry = self
+                .registry
+                .lock();
+            registry.get(trigger).cloned().unwrap_or_default()
+        };
+
+        for id in &ids {
+            let mut loaded = self
+                .loaded_extensions
+                .lock();
+            if let Some((store, instance)) = loaded.get_mut(id) {
+                instance.ark_core_entrance().call_on_callback(store, trigger)
+                    .map_err(|e| ExtensionError::from_wasmtime(e, id))?;
+            } else {
+                warn!("Unable to find extension with id: {id} in trigger registry");
+            }
+        }
         Ok(())
     }
 }
@@ -247,7 +328,6 @@ enum WasiFeature {
     Network {
         addrs: Vec<(IpAddr, Option<u16>)>,
     },
-    IpNameLookup,
 }
 
 fn parse_wasi_feature(s: &str) -> anyhow::Result<WasiFeature> {
@@ -311,8 +391,6 @@ fn parse_wasi_feature(s: &str) -> anyhow::Result<WasiFeature> {
         }
         let addrs = sock_addrs.into_iter().map(|a| (a.ip(), port)).collect();
         Ok(WasiFeature::Network { addrs })
-    } else if s == "ip_name_lookup" {
-        Ok(WasiFeature::IpNameLookup)
     } else {
         Err(anyhow::anyhow!("Unknown WASI feature: {}", s))
     }

@@ -1,0 +1,11 @@
+package ark:core@0.1.0;
+
+world entry {
+    export entrance;
+}
+
+interface entrance {
+    on-init: func();
+    on-callback: func(id: string);
+    on-destroy: func();
+}

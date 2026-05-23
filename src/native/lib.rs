@@ -3,10 +3,10 @@ pub mod shaders;
 pub mod vulkan;
 
 use std::ffi::{CStr, CString};
-use std::sync::Mutex;
 
 use anyhow::anyhow;
 use mimalloc::MiMalloc;
+use parking_lot::Mutex;
 use vulkanalia::{
     loader::{LibloadingLoader, LIBRARY},
     vk, Entry,
@@ -57,16 +57,16 @@ impl NativeContext {
         })
     }
 
-    pub fn push_error(&self, err: anyhow::Error) {
-        self.errors.lock().unwrap().push(err);
+    pub fn push_error(&self, err: impl Into<anyhow::Error>) {
+        self.errors.lock().push(err.into());
     }
 
     pub fn pop_error(&self) -> Option<anyhow::Error> {
-        self.errors.lock().unwrap().pop()
+        self.errors.lock().pop()
     }
 
     pub fn error_count(&self) -> usize {
-        self.errors.lock().unwrap().len()
+        self.errors.lock().len()
     }
 }
 
@@ -282,17 +282,10 @@ pub unsafe extern "C" fn ark_set_enabled_vulkan_features(
             }
         }
     };
-    match ctx.wasm_runtime.enabled_vulkan_features.lock() {
-        Ok(mut set) => {
-            set.clear();
-            set.extend(features);
-            0
-        }
-        Err(e) => {
-            ctx.push_error(anyhow::anyhow!("Failed to lock enabled_vulkan_features: {e}"));
-            1
-        }
-    }
+    let mut set = ctx.wasm_runtime.enabled_vulkan_features.lock();
+    set.clear();
+    set.extend(features);
+    0
 }
 
 /// # Safety
@@ -318,15 +311,8 @@ pub unsafe extern "C" fn ark_set_enabled_vulkan_extensions(
             }
         }
     };
-    match ctx.wasm_runtime.enabled_vulkan_extensions.lock() {
-        Ok(mut set) => {
-            set.clear();
-            set.extend(extensions);
-            0
-        }
-        Err(e) => {
-            ctx.push_error(anyhow::anyhow!("Failed to lock enabled_vulkan_extensions: {e}"));
-            1
-        }
-    }
+    let mut set = ctx.wasm_runtime.enabled_vulkan_extensions.lock();
+    set.clear();
+    set.extend(extensions);
+    0
 }
