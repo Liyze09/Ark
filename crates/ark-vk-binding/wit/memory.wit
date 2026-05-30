@@ -1,0 +1,14 @@
+package ark:gpu@0.1.0;
+
+interface memory {
+    record allocate-info {
+        memory-type: memory-type,
+    }
+
+    flags memory-type {
+        prefer-device,
+        prefer-host,
+        host-sequential-write,
+        host-random-access,
+    }
+}

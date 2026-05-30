@@ -1,0 +1,52 @@
+package ark:gpu@0.1.0;
+
+interface buffer {
+    use core.{vulkan-error};
+    use memory.{allocate-info};
+    use sync.{sharing-mode};
+    record buffer-create-info {
+        size: u64,
+        usage: buffer-usage,
+        // Default: exclusive
+        sharing-mode: option<sharing-mode>,
+    }
+
+    flags buffer-usage {
+        transfer-src,
+        transfer-dst,
+        uniform-texel-buffer,
+        storage-texel-buffer,
+        uniform-buffer,
+        storage-buffer,
+        index-buffer,
+        vertex-buffer,
+        indirect-buffer,
+        conditional-rendering-ext,
+        shader-binding-table-khr,
+        transform-feedback-buffer-ext,
+        transform-feedback-counter-buffer-ext,
+        video-decode-src-khr,
+        video-decode-dst-khr,
+        video-encode-dst-khr,
+        video-encode-src-khr,
+        shader-device-address,
+        acceleration-structure-build-input-read-only-khr,
+        acceleration-structure-storage-khr,
+        sampler-descriptor-buffer-ext,
+        resource-descriptor-buffer-ext,
+        micromap-build-input-read-only-ext,
+        micromap-storage-ext,
+        execution-graph-scratch-amdx,
+        push-descriptors-descriptor-buffer-ext,
+        tile-memory-qcom,
+        descriptor-heap-ext,
+    }
+    
+    resource buffer {
+        read: func(start: u64, len: u64) -> result<list<u8>, vulkan-error>;
+        write: func(start: u64, data: list<u8>) -> result<_, vulkan-error>;
+    }
+
+    buffer-from-data: func(create-info: buffer-create-info, allocate-info: allocate-info,data: list<u8>) -> result<buffer, vulkan-error>;
+    buffer-zeroed: func(create-info: buffer-create-info, allocate-info: allocate-info) -> result<buffer, vulkan-error>;
+}

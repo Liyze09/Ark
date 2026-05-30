@@ -1,0 +1,49 @@
+package ark:gpu@0.1.0;
+
+interface core {
+    variant vulkan-error {
+        not-ready,
+        timeout,
+        out-of-host-memory,
+        out-of-device-memory,
+        initialization-failed,
+        device-lost,
+        memory-map-failed,
+        layer-not-present,
+        extension-not-present,
+        feature-not-present,
+        incompatible-driver,
+        too-many-objects,
+        format-not-supported,
+        fragmented-pool,
+        out-of-pool-memory,
+        invalid-external-handle,
+        fragmentation,
+        invalid-opaque-capture-address,
+        incompatible-display,
+        not-permitted,
+        surface-lost,
+        native-window-in-use,
+        out-of-date,
+        invalid-video-std-parameters,
+        image-usage-not-supported,
+        video-picture-layout-not-supported,
+        video-profile-operation-not-supported,
+        video-profile-format-not-supported,
+        video-profile-codec-not-supported,
+        video-std-version-not-supported,
+        validation-failed,
+        full-screen-exclusive-mode-lost,
+        compression-exhausted,
+        invalid-drm-format-modifier-plane-layout,
+        invalid-shader,
+        invalid-buffer,
+        out-of-bounds,
+        unknown,
+        unnamed(string),
+    }
+}
+world vulkan {
+    import memory;
+    import buffer;
+}

@@ -1,0 +1,9 @@
+package ark:gpu@0.1.0;
+
+interface sync {
+    use queue.{queue-family};
+    variant sharing-mode {
+        exclusive,
+        concurrent(list<queue-family>),
+    }
+}

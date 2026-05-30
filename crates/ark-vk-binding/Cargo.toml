@@ -1,0 +1,13 @@
+[package]
+name = "ark-vk-binding"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["lib"]
+path = "src/lib.rs"
+
+[dependencies]
+wasmtime = { workspace = true }
+vulkanalia = { workspace = true }
+vulkanalia-vma = { workspace = true }

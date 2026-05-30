@@ -1,5 +1,4 @@
 pub mod extension;
-pub mod shaders;
 pub mod vulkan;
 
 use std::ffi::{CStr, CString};

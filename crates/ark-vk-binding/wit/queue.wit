@@ -1,0 +1,13 @@
+package ark:gpu@0.1.0;
+
+interface queue {
+    enum queue-family {
+        graphics,
+        compute,
+        transfer,
+    }
+
+    resource queue {
+        
+    }
+}
