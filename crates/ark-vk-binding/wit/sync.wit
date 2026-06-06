@@ -1,9 +1,45 @@
 package ark:gpu@0.1.0;
 
 interface sync {
-    use queue.{queue-family};
+    use core.{vulkan-error, queue-family};
+    use wasi:clocks/monotonic-clock@0.2.11.{duration};
+
+    // ── Sharing ──
+
+    /// Buffer/image sharing mode between queue families.
     variant sharing-mode {
         exclusive,
         concurrent(list<queue-family>),
     }
+
+    // ── Fence ──
+
+    /// A low-level fence for CPU–GPU synchronisation.
+    ///
+    /// Fences are signaled by the GPU when queue submission completes,
+    /// and can be waited on from the CPU side.
+    resource fence { }
+
+    /// Create a fence, optionally in the signaled state.
+    create-fence: func(signaled: bool) -> result<fence, vulkan-error>;
+
+    /// Wait for a fence to become signaled, with a timeout.
+    wait-for-fence: func(fence: borrow<fence>, timeout: duration) -> result<_, vulkan-error>;
+
+    /// Non-blocking check if a fence is signaled.
+    fence-is-signaled: func(fence: borrow<fence>) -> result<bool, vulkan-error>;
+
+    /// Reset a fence to the unsignaled state.
+    reset-fence: func(fence: borrow<fence>) -> result<_, vulkan-error>;
+
+    // ── Semaphore ──
+
+    /// A low-level semaphore for GPU–GPU synchronisation.
+    ///
+    /// Semaphores are signaled and waited on by queue submissions,
+    /// providing ordering guarantees between batches of work.
+    resource semaphore { }
+
+    /// Create a semaphore.
+    create-semaphore: func() -> result<semaphore, vulkan-error>;
 }

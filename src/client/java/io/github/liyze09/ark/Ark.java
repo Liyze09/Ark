@@ -45,6 +45,11 @@ public class Ark implements ClientModInitializer {
                 transferQueue, graphicsQueue, computeQueue,
                 ExtensionLoader.extensionPath
         );
+        if (nativeContext == null) {
+            LOGGER.error("Failed to create native context — Ark will not function");
+            return;
+        }
+
         nativeContext.setEnabledVulkanExtensions(getExtensionLoader().getCurrentlyEnabledExtensions());
         nativeContext.setEnabledVulkanFeatures(getExtensionLoader().getCurrentlyEnabledFeatures());
 

@@ -1,0 +1,70 @@
+package ark:gpu@0.1.0;
+
+interface descriptor {
+    use core.{vulkan-error};
+    use image.{image-view, sampler};
+    use buffer.{buffer};
+
+    /// Supported descriptor types for the heap.
+    enum descriptor-type {
+        sampler,
+        combined-image-sampler,
+        sampled-image,
+        storage-image,
+        uniform-texel-buffer,
+        storage-texel-buffer,
+        uniform-buffer,
+        storage-buffer,
+        input-attachment,
+    }
+
+    /// Per-type capacity for the descriptor heap.
+    record heap-pool-size {
+        descriptor-type: descriptor-type,
+        count: u32,
+    }
+
+    /// A descriptor heap — a global pool of descriptor slots backed by
+    /// VK_EXT_descriptor_indexing.
+    ///
+    /// Descriptors are written at specific heap indices and referenced by
+    /// shaders via `descriptor_index`.  Internally manages one or more
+    /// update-after-bind descriptor sets, but the complexity is hidden
+    /// from the guest.
+    resource descriptor-heap { }
+
+    /// Create a descriptor heap with the given per-type capacities.
+    ///
+    /// The guest can write descriptors at any index up to the declared
+    /// count for each type.
+    create-descriptor-heap: func(sizes: list<heap-pool-size>) -> result<descriptor-heap, vulkan-error>;
+
+    /// Describes a buffer to be written into a heap slot.
+    record buffer-descriptor-info {
+        buffer: borrow<buffer>,
+        offset: u64,
+        range: u64,
+    }
+
+    /// Describes an image to be written into a heap slot.
+    record image-descriptor-info {
+        image-view: borrow<image-view>,
+        /// VkImageLayout value (e.g. `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL`).
+        image-layout: u32,
+        sampler: option<borrow<sampler>>,
+    }
+
+    /// A single write into a descriptor heap slot.
+    record descriptor-write {
+        /// Target index in the heap (the `descriptor_index` the shader will use).
+        heap-index: u32,
+        descriptor-type: descriptor-type,
+        buffer-info: option<buffer-descriptor-info>,
+        image-info: option<image-descriptor-info>,
+    }
+
+    /// Write descriptors into heap slots at the given indices.
+    ///
+    /// All writes in one call are batched atomically.
+    write-descriptors: func(heap: borrow<descriptor-heap>, writes: list<descriptor-write>) -> result<_, vulkan-error>;
+}

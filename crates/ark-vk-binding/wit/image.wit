@@ -1,0 +1,217 @@
+package ark:gpu@0.1.0;
+
+interface image {
+    use core.{vulkan-error};
+    use memory.{allocate-info};
+
+    // ── Image types ──
+
+    /// Dimensionality of an image resource.
+    enum image-type {
+        dim1d,
+        dim2d,
+        dim3d,
+        cube,
+        dim1-array,
+        dim2d-array,
+        cube-array,
+    }
+
+    /// Declares how an image is going to be used. This is **not** just an
+    /// optimization — using an image in a way not declared here causes errors.
+    flags image-usage {
+        transfer-src,
+        transfer-dst,
+        sampled,
+        storage,
+        color-attachment,
+        depth-stencil-attachment,
+        transient-attachment,
+        input-attachment,
+        shading-rate-attachment,
+        density-map-attachment,
+    }
+
+    /// Additional flags controlling image creation.
+    flags image-create-flags {
+        mutable-format,
+        cube-compatible,
+        alias,
+        block-texel-view-compatible,
+        extended-usage,
+        corner-sampled,
+    }
+
+    /// How image texels are laid out in memory.
+    enum image-tiling {
+        optimal,
+        linear,
+    }
+
+    /// Number of samples per texel for multisampling.
+    enum sample-count {
+        sample1,
+        sample2,
+        sample4,
+        sample8,
+        sample16,
+        sample32,
+        sample64,
+    }
+
+    /// A three-dimensional extent (width × height × depth).
+    record extent3d {
+        width: u32,
+        height: u32,
+        depth: u32,
+    }
+
+    /// Identifies which aspect(s) of an image are being accessed.
+    flags image-aspect-flags {
+        color,
+        depth,
+        stencil,
+        metadata,
+        plane0,
+        plane1,
+        plane2,
+    }
+
+    /// Specifies a range of mipmap levels and array layers for an image.
+    record image-subresource-range {
+        aspect-mask: image-aspect-flags,
+        base-mip-level: u32,
+        level-count: u32,
+        base-array-layer: u32,
+        layer-count: u32,
+    }
+
+    // ── Image creation ──
+
+    /// Parameters for creating a new image.
+    record image-create-info {
+        image-type: image-type,
+        /// VkFormat value (e.g. `VK_FORMAT_R8G8B8A8_UNORM = 37`).
+        format: u32,
+        extent: extent3d,
+        mip-levels: u32,
+        array-layers: u32,
+        samples: sample-count,
+        tiling: image-tiling,
+        usage: image-usage,
+        create-flags: image-create-flags,
+    }
+
+    /// A Vulkan image object with memory bound.
+    resource image { }
+
+    /// Create an image with the given parameters and memory allocation.
+    create-image: func(create-info: image-create-info, alloc: allocate-info) -> result<image, vulkan-error>;
+
+    // ── Image view ──
+
+    /// How a shader or framebuffer interprets an image's data.
+    enum image-view-type {
+        dim1d,
+        dim2d,
+        dim3d,
+        cube,
+        dim1d-array,
+        dim2d-array,
+        cube-array,
+    }
+
+    /// Per-channel swizzle (remapping of color components).
+    record component-swizzle {
+        r: u32,  // VkComponentSwizzle
+        g: u32,
+        b: u32,
+        a: u32,
+    }
+
+    /// Parameters for creating an image view.
+    record image-view-create-info {
+        image: borrow<image>,
+        view-type: image-view-type,
+        /// VkFormat value.
+        format: u32,
+        subresource-range: image-subresource-range,
+        swizzle: option<component-swizzle>,
+    }
+
+    /// An image view — describes how the GPU interprets an image's data.
+    resource image-view { }
+
+    /// Create an image view from an image.
+    create-image-view: func(create-info: image-view-create-info) -> result<image-view, vulkan-error>;
+
+    // ── Sampler ──
+
+    /// Texture filtering mode.
+    enum filter {
+        nearest,
+        linear,
+    }
+
+    /// Mipmap selection mode.
+    enum sampler-mipmap-mode {
+        nearest,
+        linear,
+    }
+
+    /// Address mode for texture coordinates outside [0, 1].
+    enum sampler-address-mode {
+        repeat,
+        mirrored-repeat,
+        clamp-to-edge,
+        clamp-to-border,
+        mirror-clamp-to-edge,
+    }
+
+    /// Comparison function for depth / shadow samplers.
+    enum compare-op {
+        never,
+        less,
+        equal,
+        less-or-equal,
+        greater,
+        not-equal,
+        greater-or-equal,
+        always,
+    }
+
+    /// Border color for `clamp-to-border` address mode.
+    enum border-color {
+        float-transparent-black,
+        int-transparent-black,
+        float-opaque-black,
+        int-opaque-black,
+        float-opaque-white,
+        int-opaque-white,
+    }
+
+    /// Parameters for creating a texture sampler.
+    record sampler-create-info {
+        mag-filter: filter,
+        min-filter: filter,
+        mipmap-mode: sampler-mipmap-mode,
+        address-mode-u: sampler-address-mode,
+        address-mode-v: sampler-address-mode,
+        address-mode-w: sampler-address-mode,
+        mip-lod-bias: f32,
+        max-anisotropy: f32,
+        enable-anisotropy: bool,
+        compare-enable: bool,
+        compare-op: compare-op,
+        min-lod: f32,
+        max-lod: f32,
+        border-color: border-color,
+        unnormalized-coordinates: bool,
+    }
+
+    /// A texture sampler controlling how shaders read image data.
+    resource sampler { }
+
+    /// Create a texture sampler.
+    create-sampler: func(create-info: sampler-create-info) -> result<sampler, vulkan-error>;
+}

@@ -24,32 +24,26 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: setup rust
+      - name: Setup rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           target: ${{ matrix.target }}
 
-      - name: install vulkan sdk
-        uses: humbletim/install-vulkan-sdk@v1.2
-        with:
-          version: 1.4.309.0
-          cache: true
-
-      - name: cache cargo
+      - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "rust-cache"
 
-      - name: Build Rust dynamic library
+      - name: Build
         run: |
           cargo build --release --target ${{ matrix.target }}
         shell: bash
 
-      - name: collect rust artifacts
+      - name: Collect rust artifacts
         shell: bash
         run: |
           mkdir -p artifacts
@@ -57,7 +51,7 @@ jobs:
           echo "Rust artifacts:"
           ls -R artifacts/
 
-      - name: capture build artifacts
+      - name: Capture build artifacts
         uses: actions/upload-artifact@v7
         with:
           name: native-${{ matrix.target }}
@@ -66,25 +60,25 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
-      - name: checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: validate gradle wrapper
+      - name: Validate gradle wrapper
         uses: gradle/actions/wrapper-validation@v6
 
-      - name: setup jdk
+      - name: Setup jdk
         uses: actions/setup-java@v5
         with:
           java-version: '25'
           distribution: 'microsoft'
 
-      - name: make gradle wrapper executable
+      - name: Make gradle wrapper executable
         run: chmod +x ./gradlew
 
-      - name: build
+      - name: Build
         run: ./gradlew build
 
-      - name: capture build artifacts
+      - name: Capture build artifacts
         uses: actions/upload-artifact@v7
         with:
           name: jars

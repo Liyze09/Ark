@@ -1,15 +1,19 @@
 package io.github.liyze09.ark;
 
+import io.github.liyze09.ark.exception.FatalNativeException;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.lang.foreign.*;
 import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class NativeContext {
     private static final MethodHandle CREATE_NATIVE_CONTEXT;
@@ -25,11 +29,72 @@ public final class NativeContext {
     private static final MethodHandle SET_ENABLED_VULKAN_EXTENSIONS;
     private static final MethodHandle FREE_STRING;
 
+    // ── Log/fatal upcall stub handles ───────────────────────────────────────
+
+    private static final MethodHandle LOG_TRACE_HANDLE;
+    private static final MethodHandle LOG_DEBUG_HANDLE;
+    private static final MethodHandle LOG_INFO_HANDLE;
+    private static final MethodHandle LOG_WARN_HANDLE;
+    private static final MethodHandle LOG_ERROR_HANDLE;
+    private static final MethodHandle FATAL_HANDLE;
+
+    private static final FunctionDescriptor LOG_FUNC_DESC =
+            FunctionDescriptor.ofVoid(ValueLayout.ADDRESS);
+
     static {
         try {
             System.loadLibrary("ark");
             var linker = Linker.nativeLinker();
             var lookup = SymbolLookup.loaderLookup();
+            var mhLookup = MethodHandles.lookup();
+
+            // ── 1. Create log/fatal upcall stubs and call ark_init_callbacks ──
+
+            LOG_TRACE_HANDLE = mhLookup.findStatic(NativeContext.class, "onLogTrace",
+                    MethodType.methodType(void.class, MemorySegment.class));
+            LOG_DEBUG_HANDLE = mhLookup.findStatic(NativeContext.class, "onLogDebug",
+                    MethodType.methodType(void.class, MemorySegment.class));
+            LOG_INFO_HANDLE = mhLookup.findStatic(NativeContext.class, "onLogInfo",
+                    MethodType.methodType(void.class, MemorySegment.class));
+            LOG_WARN_HANDLE = mhLookup.findStatic(NativeContext.class, "onLogWarn",
+                    MethodType.methodType(void.class, MemorySegment.class));
+            LOG_ERROR_HANDLE = mhLookup.findStatic(NativeContext.class, "onLogError",
+                    MethodType.methodType(void.class, MemorySegment.class));
+            FATAL_HANDLE = mhLookup.findStatic(NativeContext.class, "onFatal",
+                    MethodType.methodType(void.class, MemorySegment.class));
+
+            // Arena that lives for the JVM lifetime — stubs must never be freed
+            var callbacksArena = Arena.ofShared();
+
+            var logTraceStub = linker.upcallStub(LOG_TRACE_HANDLE, LOG_FUNC_DESC, callbacksArena);
+            var logDebugStub = linker.upcallStub(LOG_DEBUG_HANDLE, LOG_FUNC_DESC, callbacksArena);
+            var logInfoStub = linker.upcallStub(LOG_INFO_HANDLE, LOG_FUNC_DESC, callbacksArena);
+            var logWarnStub = linker.upcallStub(LOG_WARN_HANDLE, LOG_FUNC_DESC, callbacksArena);
+            var logErrorStub = linker.upcallStub(LOG_ERROR_HANDLE, LOG_FUNC_DESC, callbacksArena);
+            var fatalStub = linker.upcallStub(FATAL_HANDLE, LOG_FUNC_DESC, callbacksArena);
+
+            var initCallbacksSymbol = lookup.find("ark_init_callbacks").orElseThrow();
+            var initCallbacksHandle = linker.downcallHandle(
+                    initCallbacksSymbol,
+                    FunctionDescriptor.of(
+                            ValueLayout.JAVA_INT,
+                            ValueLayout.ADDRESS, // log_trace
+                            ValueLayout.ADDRESS, // log_debug
+                            ValueLayout.ADDRESS, // log_info
+                            ValueLayout.ADDRESS, // log_warn
+                            ValueLayout.ADDRESS, // log_error
+                            ValueLayout.ADDRESS  // fatal_handler
+                    )
+            );
+            int rc = (int) initCallbacksHandle.invokeExact(
+                    logTraceStub, logDebugStub, logInfoStub,
+                    logWarnStub, logErrorStub, fatalStub
+            );
+            if (rc != 0) {
+                Ark.LOGGER.warn("ark_init_callbacks was already initialized");
+            }
+
+            // ── 2. Downcall handles for all other native functions ────────────
 
             var createSymbol = lookup.find("ark_create_native_context").orElseThrow();
             CREATE_NATIVE_CONTEXT = linker.downcallHandle(
@@ -114,35 +179,381 @@ public final class NativeContext {
                     freeStringSymbol,
                     FunctionDescriptor.ofVoid(ValueLayout.ADDRESS)
             );
-        } catch (Exception e) {
+        } catch (Throwable e) {
             throw new ExceptionInInitializerError(e);
         }
     }
 
+    // ── Log/fatal callbacks (invoked from Rust side via FFM upcall stubs) ──
+
+    private static void onLogTrace(@NonNull MemorySegment msg) {
+        Ark.LOGGER.trace(msg.getString(0));
+    }
+
+    private static void onLogDebug(@NonNull MemorySegment msg) {
+        Ark.LOGGER.debug(msg.getString(0));
+    }
+
+    private static void onLogInfo(@NonNull MemorySegment msg) {
+        Ark.LOGGER.info(msg.getString(0));
+    }
+
+    private static void onLogWarn(@NonNull MemorySegment msg) {
+        Ark.LOGGER.warn(msg.getString(0));
+    }
+
+    private static void onLogError(@NonNull MemorySegment msg) {
+        Ark.LOGGER.error(msg.getString(0));
+    }
+
+    private static void onFatal(@NonNull MemorySegment msg) {
+        Ark.LOGGER.error("[Ark] [FATAL] A Rust panic occurred: {}", msg.getString(0));
+        var ctx = Ark.getNativeContext();
+        if (ctx != null) {
+            ctx.markDefunct();
+        }
+    }
+
+    // ── Instance state ─────────────────────────────────────────────────────
+
     private final long address;
+    private final AtomicBoolean destroyed = new AtomicBoolean(false);
+    private volatile boolean defunct;
+    private volatile List<String> fatalErrors = List.of();
 
     private NativeContext(long address) {
         this.address = address;
     }
 
-    @Contract("_, _, _, _, _, _, _ -> new")
-    public static @NonNull NativeContext create(
+    // ── Fatal error handling ───────────────────────────────────────────────
+
+    /**
+     * Called by the static {@link #onFatal} callback (from native panic handler).
+     * Collects all pending errors from the Rust side exactly once, then marks
+     * this context as defunct.
+     *
+     * Must not call {@link #destroy()} because the native call that triggered
+     * the panic is still on the stack — the context is freed later in {@link #exit()}.
+     */
+    void markDefunct() {
+        if (this.defunct) {
+            return; // already marked — onFatal may fire multiple times
+        }
+        // Drain errors while the context is still alive (defunct not yet set).
+        // Enter/exit guards in popError() are bypassable because defunct is false.
+        var errors = new ArrayList<String>();
+        try {
+            String err;
+            while ((err = popErrorRaw()) != null) {
+                errors.add(err);
+            }
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to drain errors during fatal", t);
+        }
+        this.fatalErrors = Collections.unmodifiableList(errors);
+        this.defunct = true;
+    }
+
+    /**
+     * Unchecked version of {@link #popError} that skips the enter/exit guards.
+     * Safe to call from {@link #markDefunct} because defunct is still {@code false}
+     * at that point and the native context is still alive.
+     */
+    private @Nullable String popErrorRaw() {
+        try {
+            var errorPtr = (MemorySegment) POP_ERROR.invokeExact(this.address);
+            if (MemorySegment.NULL.equals(errorPtr)) {
+                return null;
+            }
+            var msg = errorPtr.getString(0);
+            FREE_STRING.invokeExact(errorPtr);
+            return msg;
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to pop error", t);
+            return null;
+        }
+    }
+
+    // ── Guard helpers ──────────────────────────────────────────────────────
+
+    /**
+     * Entry check: throws {@link FatalNativeException} if the context is
+     * already defunct (a native panic occurred earlier).
+     */
+    private void enter() {
+        if (this.defunct) {
+            throw new FatalNativeException("Native context is defunct");
+        }
+    }
+
+    /**
+     * Exit check: if the context became defunct during the native call,
+     * release the native resources (idempotent) and throw.
+     */
+    private void exit() {
+        if (!this.defunct) {
+            return;
+        }
+        this.destroy();
+        throw new FatalNativeException("Native context destroyed due to fatal native error");
+    }
+
+    // ── Factory ────────────────────────────────────────────────────────────
+    public static @Nullable NativeContext create(
             long instanceHandle, long deviceHandle, long vmaHandle,
             long transferQueue, long graphicsQueue, long computeQueue,
             Path extensionFolder
     ) {
         try (var arena = Arena.ofConfined()) {
             var pathSegment = arena.allocateFrom(extensionFolder.toAbsolutePath().toString());
-            return new NativeContext((long) CREATE_NATIVE_CONTEXT.invokeExact(
+
+            long address = (long) CREATE_NATIVE_CONTEXT.invokeExact(
                     instanceHandle, deviceHandle, vmaHandle,
                     transferQueue, graphicsQueue, computeQueue,
                     pathSegment
-            ));
+            );
+
+            if (address == 0) {
+                Ark.LOGGER.error("ark_create_native_context returned null");
+                return null;
+            }
+
+            return new NativeContext(address);
         } catch (Throwable t) {
             Ark.LOGGER.error("Failed to call ark_create_native_context", t);
             throw new RuntimeException(t);
         }
     }
+
+    // ── Lifecycle ──────────────────────────────────────────────────────────
+
+    /**
+     * Releases the native context.  Idempotent — subsequent calls are no-ops.
+     */
+    public void destroy() {
+        if (!destroyed.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            DESTROY_NATIVE_CONTEXT.invokeExact(this.address);
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to call ark_destroy_native_context", t);
+        }
+    }
+
+    // ── error retrieval ────────────────────────────────────────────────────
+
+    /// Pops the most recent error from the native context, or null if empty.
+    public @Nullable String popError() {
+        enter();
+        try {
+            var errorPtr = (MemorySegment) POP_ERROR.invokeExact(this.address);
+            if (MemorySegment.NULL.equals(errorPtr)) {
+                return null;
+            }
+            var msg = errorPtr.getString(0);
+            FREE_STRING.invokeExact(errorPtr);
+            return msg;
+        } catch (FatalNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to pop error from native context", t);
+            return null;
+        } finally {
+            exit();
+        }
+    }
+
+    /// Returns the number of errors pending in the native context.
+    public int errorCount() {
+        enter();
+        try {
+            return (int) ERROR_COUNT.invokeExact(this.address);
+        } catch (FatalNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to get error count from native context", t);
+            return 0;
+        } finally {
+            exit();
+        }
+    }
+
+    /// Drains all pending errors from the native context into a list.
+    /// If the context is defunct, returns the errors that were collected
+    /// during the fatal event.
+    public List<String> drainErrors() {
+        if (this.defunct) {
+            return this.fatalErrors;
+        }
+        enter();
+        try {
+            var count = this.errorCount();
+            if (count == 0) {
+                return Collections.emptyList();
+            }
+            var errors = new ArrayList<String>(count);
+            String err;
+            while ((err = this.popError()) != null) {
+                errors.add(err);
+            }
+            return errors;
+        } catch (FatalNativeException e) {
+            throw e;
+        } finally {
+            exit();
+        }
+    }
+
+    // ── extension management ───────────────────────────────────────────────
+
+    /// Loads an extension from a zip file in the extension folder.
+    ///
+    /// @param fileName     the zip file name (relative to the extension folder)
+    /// @param wasiFeatures WASI feature strings; pass null or empty for none
+    /// @return true on success
+    public boolean loadExtension(String fileName, @Nullable List<String> wasiFeatures) {
+        enter();
+        try (var arena = Arena.ofConfined()) {
+            var nameSeg = arena.allocateFrom(fileName);
+            var jsonStr = toJsonArray(wasiFeatures);
+            var jsonSeg = jsonStr != null ? arena.allocateFrom(jsonStr) : MemorySegment.NULL;
+            int rc = (int) LOAD_EXTENSION.invokeExact(this.address, nameSeg, jsonSeg);
+            return rc == 0;
+        } catch (FatalNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to load extension '{}'", fileName, t);
+            return false;
+        } finally {
+            exit();
+        }
+    }
+
+    /// Initializes a specific loaded extension by its manifest id.
+    ///
+    /// @return true on success
+    public boolean initializeExtension(String id) {
+        enter();
+        try (var arena = Arena.ofConfined()) {
+            var idSeg = arena.allocateFrom(id);
+            int rc = (int) INITIALIZE_EXTENSION.invokeExact(this.address, idSeg);
+            return rc == 0;
+        } catch (FatalNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to initialize extension '{}'", id, t);
+            return false;
+        } finally {
+            exit();
+        }
+    }
+
+    /// Initializes all loaded extensions.
+    ///
+    /// @return true on success
+    public boolean initializeExtensions() {
+        enter();
+        try {
+            int rc = (int) INITIALIZE_EXTENSIONS.invokeExact(this.address);
+            return rc == 0;
+        } catch (FatalNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to initialize extensions", t);
+            return false;
+        } finally {
+            exit();
+        }
+    }
+
+    /// Disables an extension: runs its close function and removes its hooks.
+    /// The extension remains loaded but inactive.
+    /// @return true on success
+    public boolean disableExtension(String id) {
+        enter();
+        try (var arena = Arena.ofConfined()) {
+            var idSeg = arena.allocateFrom(id);
+            int rc = (int) DISABLE_EXTENSION.invokeExact(this.address, idSeg);
+            return rc == 0;
+        } catch (FatalNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to disable extension '{}'", id, t);
+            return false;
+        } finally {
+            exit();
+        }
+    }
+
+    /// Unloads an extension: disables it and removes it from memory.
+    /// @return true on success
+    public boolean unloadExtension(String id) {
+        enter();
+        try (var arena = Arena.ofConfined()) {
+            var idSeg = arena.allocateFrom(id);
+            int rc = (int) UNLOAD_EXTENSION.invokeExact(this.address, idSeg);
+            return rc == 0;
+        } catch (FatalNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to unload extension '{}'", id, t);
+            return false;
+        } finally {
+            exit();
+        }
+    }
+
+    /// Sets the enabled Vulkan feature names on the native side, as a JSON array.
+    /// This populates the sets queried by WASM extensions via check_vulkan_feature().
+    /// @return true on success
+    public boolean setEnabledVulkanFeatures(@Nullable List<String> features) {
+        enter();
+        try (var arena = Arena.ofConfined()) {
+            var jsonStr = toJsonArray(features);
+            var jsonSeg = jsonStr != null ? arena.allocateFrom(jsonStr) : MemorySegment.NULL;
+            int rc = (int) SET_ENABLED_VULKAN_FEATURES.invokeExact(this.address, jsonSeg);
+            return rc == 0;
+        } catch (FatalNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to set enabled vulkan features", t);
+            return false;
+        } finally {
+            exit();
+        }
+    }
+
+    /// Sets the enabled Vulkan extension names on the native side, as a JSON array.
+    /// This populates the sets queried by WASM extensions via check_vulkan_extension().
+    /// @return true on success
+    public boolean setEnabledVulkanExtensions(@Nullable List<String> extensions) {
+        enter();
+        try (var arena = Arena.ofConfined()) {
+            var jsonStr = toJsonArray(extensions);
+            var jsonSeg = jsonStr != null ? arena.allocateFrom(jsonStr) : MemorySegment.NULL;
+            int rc = (int) SET_ENABLED_VULKAN_EXTENSIONS.invokeExact(this.address, jsonSeg);
+            return rc == 0;
+        } catch (FatalNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to set enabled vulkan extensions", t);
+            return false;
+        } finally {
+            exit();
+        }
+    }
+
+    public long getAddress() {
+        return this.address;
+    }
+
+    @Override
+    public String toString() {
+        return Long.toHexString(this.getAddress());
+    }
+
+    // ── helpers ────────────────────────────────────────────────────────────
 
     private static @Nullable String toJsonArray(@Nullable List<String> items) {
         if (items == null || items.isEmpty()) {
@@ -157,168 +568,5 @@ public final class NativeContext {
         }
         sb.append(']');
         return sb.toString();
-    }
-
-    // ── error retrieval ────────────────────────────────────────
-
-    public void destroy() {
-        try {
-            DESTROY_NATIVE_CONTEXT.invokeExact(this.address);
-        } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to call ark_destroy_native_context", t);
-        }
-    }
-
-    /// Pops the most recent error from the native context, or null if empty.
-    public String popError() {
-        try {
-            var errorPtr = (MemorySegment) POP_ERROR.invokeExact(this.address);
-            if (MemorySegment.NULL.equals(errorPtr)) {
-                return null;
-            }
-            var msg = errorPtr.getString(0);
-            FREE_STRING.invokeExact(errorPtr);
-            return msg;
-        } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to pop error from native context", t);
-            return null;
-        }
-    }
-
-    /// Returns the number of errors pending in the native context.
-    public int errorCount() {
-        try {
-            return (int) ERROR_COUNT.invokeExact(this.address);
-        } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to get error count from native context", t);
-            return 0;
-        }
-    }
-
-    // ── extension management ────────────────────────────────────
-
-    /// Drains all pending errors from the native context into a list.
-    public List<String> drainErrors() {
-        var count = this.errorCount();
-        if (count == 0) {
-            return Collections.emptyList();
-        }
-        var errors = new ArrayList<String>(count);
-        String err;
-        while ((err = this.popError()) != null) {
-            errors.add(err);
-        }
-        return errors;
-    }
-
-    /// Loads an extension from a zip file in the extension folder.
-    ///
-    /// @param fileName     the zip file name (relative to the extension folder)
-    /// @param wasiFeatures WASI feature strings; pass null or empty for none
-    /// @return true on success
-    public boolean loadExtension(@NonNull String fileName, @Nullable List<String> wasiFeatures) {
-        try (var arena = Arena.ofConfined()) {
-            var nameSeg = arena.allocateFrom(fileName);
-            var jsonStr = toJsonArray(wasiFeatures);
-            var jsonSeg = jsonStr != null ? arena.allocateFrom(jsonStr) : MemorySegment.NULL;
-            int rc = (int) LOAD_EXTENSION.invokeExact(this.address, nameSeg, jsonSeg);
-            return rc == 0;
-        } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to load extension '{}'", fileName, t);
-            return false;
-        }
-    }
-
-    /// Initializes a specific loaded extension by its manifest id.
-    ///
-    /// @return true on success
-    public boolean initializeExtension(@NonNull String id) {
-        try (var arena = Arena.ofConfined()) {
-            var idSeg = arena.allocateFrom(id);
-            int rc = (int) INITIALIZE_EXTENSION.invokeExact(this.address, idSeg);
-            return rc == 0;
-        } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to initialize extension '{}'", id, t);
-            return false;
-        }
-    }
-
-    /// Initializes all loaded extensions.
-    ///
-    /// @return true on success
-    public boolean initializeExtensions() {
-        try {
-            int rc = (int) INITIALIZE_EXTENSIONS.invokeExact(this.address);
-            return rc == 0;
-        } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to initialize extensions", t);
-            return false;
-        }
-    }
-
-    /// Disables an extension: runs its close function and removes its hooks.
-    /// The extension remains loaded but inactive.
-    /// @return true on success
-    public boolean disableExtension(@NonNull String id) {
-        try (var arena = Arena.ofConfined()) {
-            var idSeg = arena.allocateFrom(id);
-            int rc = (int) DISABLE_EXTENSION.invokeExact(this.address, idSeg);
-            return rc == 0;
-        } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to disable extension '{}'", id, t);
-            return false;
-        }
-    }
-
-    /// Unloads an extension: disables it and removes it from memory.
-    /// @return true on success
-    public boolean unloadExtension(@NonNull String id) {
-        try (var arena = Arena.ofConfined()) {
-            var idSeg = arena.allocateFrom(id);
-            int rc = (int) UNLOAD_EXTENSION.invokeExact(this.address, idSeg);
-            return rc == 0;
-        } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to unload extension '{}'", id, t);
-            return false;
-        }
-    }
-
-    /// Sets the enabled Vulkan feature names on the native side, as a JSON array.
-    /// This populates the sets queried by WASM extensions via check_vulkan_feature().
-    /// @return true on success
-    public boolean setEnabledVulkanFeatures(@Nullable List<String> features) {
-        try (var arena = Arena.ofConfined()) {
-            var jsonStr = toJsonArray(features);
-            var jsonSeg = jsonStr != null ? arena.allocateFrom(jsonStr) : MemorySegment.NULL;
-            int rc = (int) SET_ENABLED_VULKAN_FEATURES.invokeExact(this.address, jsonSeg);
-            return rc == 0;
-        } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to set enabled vulkan features", t);
-            return false;
-        }
-    }
-
-    /// Sets the enabled Vulkan extension names on the native side, as a JSON array.
-    /// This populates the sets queried by WASM extensions via check_vulkan_extension().
-    /// @return true on success
-    public boolean setEnabledVulkanExtensions(@Nullable List<String> extensions) {
-        try (var arena = Arena.ofConfined()) {
-            var jsonStr = toJsonArray(extensions);
-            var jsonSeg = jsonStr != null ? arena.allocateFrom(jsonStr) : MemorySegment.NULL;
-            int rc = (int) SET_ENABLED_VULKAN_EXTENSIONS.invokeExact(this.address, jsonSeg);
-            return rc == 0;
-        } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to set enabled vulkan extensions", t);
-            return false;
-        }
-    }
-
-    public long getAddress() {
-        return this.address;
-    }
-
-    @Override
-    public String toString() {
-        return Long.toHexString(this.getAddress());
     }
 }

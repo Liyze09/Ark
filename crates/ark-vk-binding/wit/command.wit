@@ -1,1 +1,403 @@
 package ark:gpu@0.1.0;
+
+interface command-buffer {
+    use core.{vulkan-error, queue-family};
+    use pipeline.{pipeline-bind-point, pipeline-layout, compute-pipeline, graphics-pipeline, ray-tracing-pipeline};
+    use descriptor.{descriptor-heap};
+    use buffer.{buffer};
+    use image.{image, image-view, image-aspect-flags, image-subresource-range, extent3d, filter};
+
+    // ── Command buffer creation ──
+
+    /// Usage flags for command buffer allocation.
+    enum command-buffer-usage {
+        one-time-submit,
+        multiple-submit,
+        simultaneous-use,
+    }
+
+    /// A command buffer being built (records commands before submission).
+
+    /// A fully-built command buffer ready for submission.
+    resource command-buffer { }
+
+    /// Allocate a primary command buffer builder for the given queue family.
+    primary-command-buffer: func(queue-family: queue-family, usage: command-buffer-usage) -> own<command-buffer-builder>;
+
+    /// Finalize building and produce an executable command buffer.
+    build-command-buffer: func(cmd: own<command-buffer-builder>) -> own<command-buffer>;
+
+    // ── Copy helpers ──
+
+    /// Describes a region for buffer-to-buffer copy.
+    record buffer-copy {
+        src-offset: u64,
+        dst-offset: u64,
+        size: u64,
+    }
+
+    /// Specifies which image subresource layers are accessed.
+    record image-subresource-layers {
+        aspect-mask: image-aspect-flags,
+        mip-level: u32,
+        base-array-layer: u32,
+        layer-count: u32,
+    }
+
+    /// A three-dimensional offset within an image.
+    record offset3d {
+        x: u32,
+        y: u32,
+        z: u32,
+    }
+
+    /// Describes a region for buffer-to-image or image-to-buffer copy.
+    record buffer-image-copy {
+        buffer-offset: u64,
+        buffer-row-length: u32,
+        buffer-image-height: u32,
+        image-subresource: image-subresource-layers,
+        image-offset: offset3d,
+        image-extent: extent3d,
+    }
+
+    /// Describes a region for image-to-image copy.
+    record image-copy {
+        src-subresource: image-subresource-layers,
+        src-offset: offset3d,
+        dst-subresource: image-subresource-layers,
+        dst-offset: offset3d,
+        extent: extent3d,
+    }
+
+    /// Describes a region for image blit (with filtering).
+    record image-blit {
+        src-subresource: image-subresource-layers,
+        src-offset0: offset3d,
+        src-offset1: offset3d,
+        dst-subresource: image-subresource-layers,
+        dst-offset0: offset3d,
+        dst-offset1: offset3d,
+    }
+
+    /// Describes a region for MSAA resolve.
+    record image-resolve {
+        src-subresource: image-subresource-layers,
+        src-offset: offset3d,
+        dst-subresource: image-subresource-layers,
+        dst-offset: offset3d,
+        extent: extent3d,
+    }
+
+    // ── Clear values ──
+
+    /// Floating-point clear color (RGBA).
+    record clear-color {
+        floats: tuple<f32, f32, f32, f32>,
+    }
+
+    /// Depth and stencil clear values.
+    record clear-depth-stencil {
+        depth: f32,
+        stencil: u32,
+    }
+
+    // ── Barrier types ──
+
+    /// A memory barrier affecting a buffer range.
+    record buffer-barrier {
+        /// VkAccessFlags — source access mask.
+        src-access: u32,
+        /// VkAccessFlags — destination access mask.
+        dst-access: u32,
+        buffer: borrow<buffer>,
+        offset: u64,
+        size: u64,
+    }
+
+    /// A memory barrier transitioning an image subresource range between layouts.
+    record image-barrier {
+        /// VkAccessFlags — source access mask.
+        src-access: u32,
+        /// VkAccessFlags — destination access mask.
+        dst-access: u32,
+        /// VkImageLayout — old layout.
+        old-layout: u32,
+        /// VkImageLayout — new layout.
+        new-layout: u32,
+        image: borrow<image>,
+        subresource-range: image-subresource-range,
+    }
+
+    /// A pipeline barrier synchronising access between stages.
+    record memory-barrier {
+        /// VkPipelineStageFlags — stage(s) that produce the data.
+        src-stage: u32,
+        /// VkPipelineStageFlags — stage(s) that consume the data.
+        dst-stage: u32,
+        /// If true, applies to all memory (no specific buffer/image).
+        global: bool,
+        buffer: option<buffer-barrier>,
+        image: option<image-barrier>,
+    }
+
+    // ── Dynamic rendering ──
+
+    /// Describes a color attachment for dynamic rendering.
+    record rendering-color-attachment {
+        image-view: borrow<image-view>,
+        /// VkImageLayout — initial layout for the attachment.
+        image-layout: u32,
+        resolve-image-view: option<borrow<image-view>>,
+        resolve-image-layout: u32,
+        /// VkAttachmentLoadOp
+        load-op: u32,
+        /// VkAttachmentStoreOp
+        store-op: u32,
+        /// Clear color, required when load-op is `VK_ATTACHMENT_LOAD_OP_CLEAR`.
+        clear-value: option<clear-color>,
+    }
+
+    /// Describes a depth/stencil attachment for dynamic rendering.
+    record rendering-depth-stencil-attachment {
+        image-view: borrow<image-view>,
+        image-layout: u32,
+        depth-load-op: u32,
+        depth-store-op: u32,
+        stencil-load-op: u32,
+        stencil-store-op: u32,
+        clear-depth: option<f32>,
+        clear-stencil: option<u32>,
+    }
+
+    // ── Viewport / Scissor ──
+
+    /// A viewport defining the transformation from normalized device
+    /// coordinates to framebuffer coordinates.
+    record viewport {
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        min-depth: f32,
+        max-depth: f32,
+    }
+
+    /// A 2D rectangle, used for scissor tests.
+    record rect2d {
+        offset-x: s32,
+        offset-y: s32,
+        width: u32,
+        height: u32,
+    }
+
+    // ── Command builder methods ──
+
+    resource command-buffer-builder {
+        // ── Pipeline binding ──
+
+        /// Bind a compute pipeline for subsequent dispatch commands.
+        bind-compute-pipeline: func(pipeline: borrow<compute-pipeline>) -> result<_, vulkan-error>;
+
+        /// Bind a graphics pipeline for subsequent draw commands.
+        bind-graphics-pipeline: func(pipeline: borrow<graphics-pipeline>) -> result<_, vulkan-error>;
+
+        /// Bind a ray-tracing pipeline for subsequent trace rays commands.
+        bind-ray-tracing-pipeline: func(pipeline: borrow<ray-tracing-pipeline>) -> result<_, vulkan-error>;
+
+        // ── Descriptor heap binding ──
+
+        /// Bind descriptor heap indices to the given pipeline's descriptor sets.
+        ///
+        /// `descriptor-indices` maps each set (starting at `first-set`) to a
+        /// contiguous range of heap slots.  The length of the list determines
+        /// how many consecutive sets are bound.
+        bind-descriptor-heap: func(
+            bind-point: pipeline-bind-point,
+            layout: borrow<pipeline-layout>,
+            first-set: u32,
+            descriptor-indices: list<u32>,
+        ) -> result<_, vulkan-error>;
+
+        // ── Push constants ──
+
+        /// Write push constant data accessible to the given shader stages.
+        push-constants: func(
+            layout: borrow<pipeline-layout>,
+            /// VkShaderStageFlags — which stages can read the data.
+            stage-flags: u32,
+            offset: u32,
+            data: list<u8>,
+        ) -> result<_, vulkan-error>;
+
+        // ── Dispatch (compute) ──
+
+        /// Launch a compute shader workgroup grid.
+        dispatch: func(x: u32, y: u32, z: u32) -> result<_, vulkan-error>;
+
+        /// Indirect dispatch with parameters stored in a buffer.
+        dispatch-indirect: func(buffer: borrow<buffer>, offset: u64) -> result<_, vulkan-error>;
+
+        /// Indirect dispatch with draw count sourced from a buffer.
+        dispatch-indirect-count: func(
+            buffer: borrow<buffer>,
+            offset: u64,
+            count-buffer: borrow<buffer>,
+            count-offset: u64,
+            max-draw-count: u32,
+        ) -> result<_, vulkan-error>;
+
+        // ── Draw (graphics) ──
+
+        /// Issue a non-indexed draw.
+        draw: func(
+            vertex-count: u32,
+            instance-count: u32,
+            first-vertex: u32,
+            first-instance: u32,
+        ) -> result<_, vulkan-error>;
+
+        /// Issue an indexed draw.
+        draw-indexed: func(
+            index-count: u32,
+            instance-count: u32,
+            first-index: u32,
+            vertex-offset: s32,
+            first-instance: u32,
+        ) -> result<_, vulkan-error>;
+
+        /// Indirect non-indexed draw with parameters in a buffer.
+        draw-indirect: func(
+            buffer: borrow<buffer>,
+            offset: u64,
+            draw-count: u32,
+            stride: u32,
+        ) -> result<_, vulkan-error>;
+
+        /// Indirect indexed draw with parameters in a buffer.
+        draw-indexed-indirect: func(
+            buffer: borrow<buffer>,
+            offset: u64,
+            draw-count: u32,
+            stride: u32,
+        ) -> result<_, vulkan-error>;
+
+        // ── Copy ──
+
+        /// Copy regions between two buffers.
+        copy-buffer: func(
+            src: borrow<buffer>,
+            dst: borrow<buffer>,
+            regions: list<buffer-copy>,
+        ) -> result<_, vulkan-error>;
+
+        /// Copy data from a buffer into an image.
+        copy-buffer-to-image: func(
+            src: borrow<buffer>,
+            dst: borrow<image>,
+            /// VkImageLayout — the destination image's current layout.
+            dst-layout: u32,
+            regions: list<buffer-image-copy>,
+        ) -> result<_, vulkan-error>;
+
+        /// Copy data from an image into a buffer.
+        copy-image-to-buffer: func(
+            src: borrow<image>,
+            /// VkImageLayout — the source image's current layout.
+            src-layout: u32,
+            dst: borrow<buffer>,
+            regions: list<buffer-image-copy>,
+        ) -> result<_, vulkan-error>;
+
+        /// Copy regions between two images.
+        copy-image: func(
+            src: borrow<image>,
+            src-layout: u32,
+            dst: borrow<image>,
+            dst-layout: u32,
+            regions: list<image-copy>,
+        ) -> result<_, vulkan-error>;
+
+        // ── Fill / Clear ──
+
+        /// Fill a buffer range with a constant 32-bit value.
+        fill-buffer: func(
+            buffer: borrow<buffer>,
+            offset: u64,
+            size: u64,
+            data: u32,
+        ) -> result<_, vulkan-error>;
+
+        /// Clear regions of a color image to a constant color.
+        clear-color-image: func(
+            image: borrow<image>,
+            /// VkImageLayout — the image's current layout.
+            layout: u32,
+            color: clear-color,
+            ranges: list<image-subresource-range>,
+        ) -> result<_, vulkan-error>;
+
+        /// Clear regions of a depth/stencil image.
+        clear-depth-stencil-image: func(
+            image: borrow<image>,
+            /// VkImageLayout — the image's current layout.
+            layout: u32,
+            value: clear-depth-stencil,
+            ranges: list<image-subresource-range>,
+        ) -> result<_, vulkan-error>;
+
+        // ── Blit / Resolve ──
+
+        /// Copy image regions with filtering (scale + format conversion).
+        blit-image: func(
+            src: borrow<image>,
+            src-layout: u32,
+            dst: borrow<image>,
+            dst-layout: u32,
+            regions: list<image-blit>,
+            filter: filter,
+        ) -> result<_, vulkan-error>;
+
+        /// Resolve multisampled image regions to a single-sample image.
+        resolve-image: func(
+            src: borrow<image>,
+            src-layout: u32,
+            dst: borrow<image>,
+            dst-layout: u32,
+            regions: list<image-resolve>,
+        ) -> result<_, vulkan-error>;
+
+        // ── Synchronization ──
+
+        /// Insert a pipeline barrier for memory and layout transitions.
+        pipeline-barrier: func(barriers: list<memory-barrier>) -> result<_, vulkan-error>;
+
+        // ── Dynamic rendering ──
+
+        /// Begin a dynamic rendering instance.
+        begin-rendering: func(
+            render-area: rect2d,
+            layer-count: u32,
+            color-attachments: list<rendering-color-attachment>,
+            depth-stencil-attachment: option<rendering-depth-stencil-attachment>,
+        ) -> result<_, vulkan-error>;
+
+        /// End the current dynamic rendering instance.
+        end-rendering: func() -> result<_, vulkan-error>;
+
+        // ── Dynamic state (graphics) ──
+
+        /// Set viewport(s) dynamically.
+        set-viewport: func(first: u32, viewports: list<viewport>) -> result<_, vulkan-error>;
+
+        /// Set scissor rectangle(s) dynamically.
+        set-scissor: func(first: u32, scissors: list<rect2d>) -> result<_, vulkan-error>;
+
+        /// Set the line width for line primitives.
+        set-line-width: func(width: f32) -> result<_, vulkan-error>;
+
+        /// Set depth bias parameters.
+        set-depth-bias: func(constant: f32, slope: f32, clamp: f32) -> result<_, vulkan-error>;
+
+    }
+}

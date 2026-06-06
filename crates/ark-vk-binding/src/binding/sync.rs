@@ -1,11 +1,9 @@
 use vulkanalia::vk;
 
-use crate::
-    binding::ark::gpu::{
-        sync::SharingMode,
-        queue::QueueFamily,
-    }
-;
+use crate::binding::ark::gpu::{
+    core::QueueFamily,
+    sync::SharingMode,
+};
 
 pub fn vk_sharing_mode(mode: &Option<SharingMode>) -> (vk::SharingMode, Vec<u32>) {
     match mode {

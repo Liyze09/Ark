@@ -1,7 +1,7 @@
 [package]
 name = "ark"
-version.workspace = true
-edition.workspace = true
+version = "0.1.0"
+edition = "2024"
 
 [lib]
 crate-type = ["cdylib"]
@@ -30,4 +30,3 @@ opt-level = 1
 lto = "fat"
 opt-level = 3
 overflow-checks = false
-panic = "abort"

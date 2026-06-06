@@ -1,13 +1,85 @@
 package ark:gpu@0.1.0;
 
 interface queue {
-    enum queue-family {
-        graphics,
-        compute,
-        transfer,
+    use core.{vulkan-error};
+    use command-buffer.{command-buffer};
+    use sync.{semaphore, fence};
+    use wasi:clocks/monotonic-clock@0.2.11.{duration};
+
+    /// Describes a semaphore to wait on before queue submission proceeds,
+    /// and which pipeline stage(s) must wait.
+    record semaphore-wait-info {
+        semaphore: borrow<semaphore>,
+        /// VkPipelineStageFlags — stage(s) that wait for this semaphore.
+        wait-stage: u32,
     }
 
+    /// A queue that commands can be submitted to.
     resource queue {
-        
+        /// Low-level submit of command buffers to this queue.
+        ///
+        /// `command-buffers` — one or more command buffers to execute in order.
+        /// `wait-semaphores` — semaphores to wait on before execution begins.
+        /// `signal-semaphores` — semaphores to signal after execution completes.
+        /// `fence` — optional fence to signal after execution is fully complete.
+        ///
+        /// Returns immediately after queueing; use the fence or signaled
+        /// semaphores to track completion.
+        submit: func(
+            command-buffers: list<borrow<command-buffer>>,
+            wait-semaphores: list<semaphore-wait-info>,
+            signal-semaphores: list<borrow<semaphore>>,
+            fence: option<borrow<fence>>,
+        ) -> result<_, vulkan-error>;
+
+        /// Block until all previously-submitted commands on this queue
+        /// have completed execution.
+        wait-idle: func() -> result<_, vulkan-error>;
     }
+
+    // ── High-level submission (syntactic sugar) ──
+
+    /// A builder for accumulating command buffers and synchronisation
+    /// before flushing them as a single queue submission.
+    ///
+    /// This is syntactic sugar over `queue.submit`.  Prefer the
+    /// lower-level `queue.submit` when you need fine-grained control
+    /// over semaphores and fences.
+    resource submission {
+        /// Start building a submission.
+        constructor();
+
+        /// Queue a command buffer for execution (in order).
+        execute: func(queue: borrow<queue>, command-buffer: own<command-buffer>);
+
+        /// Signal a semaphore after this submission completes.
+        signal-semaphore: func();
+
+        /// Submit all queued work without an explicit fence.
+        /// Returns when the work has been queued (not completed).
+        flush: func() -> result<_, vulkan-error>;
+
+        /// Submit all queued work and return a fence-future that can
+        /// be awaited from the CPU.
+        signal-fence-and-flush: func() -> result<own<fence-future>, vulkan-error>;
+    }
+
+    /// A future that resolves when the GPU has finished executing
+    /// the associated submission.
+    resource fence-future {
+        /// Block until the fence is signaled, with a timeout.
+        wait: func(duration: duration) -> result<_, vulkan-error>;
+
+        /// Non-blocking check if the fence is signaled.
+        try-wait: func() -> result<bool, vulkan-error>;
+    }
+
+    /// Borrow the graphics queue.
+    graphics: func() -> queue;
+
+    /// Borrow the compute queue.
+    compute: func() -> queue;
+
+    /// Borrow the transfer queue.
+    transfer: func() -> queue;
 }

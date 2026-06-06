@@ -1,5 +1,6 @@
 package ark:gpu@0.1.0;
 
+/// Core Vulkan error types and shared enums across all GPU interfaces.
 interface core {
     variant vulkan-error {
         not-ready,
@@ -42,8 +43,47 @@ interface core {
         unknown,
         unnamed(string),
     }
+
+    /// Physical queue families on the device.
+    enum queue-family {
+        graphics,
+        compute,
+        transfer,
+    }
 }
+
+/// The root world for GPU-accelerated WASM extensions.
+///
+/// A guest component targeting this world can access all GPU resources,
+/// commands, and synchronisation primitives defined in the `ark:gpu`
+/// package, together with WASI clocks for timing.
 world vulkan {
+    include wasi:clocks/imports@0.2.11;
+
+    /// Buffer and image memory allocation hints.
     import memory;
+
+    /// GPU buffer creation and data transfer.
     import buffer;
+
+    /// Shader module compilation from SPIR-V.
+    import shader;
+
+    /// Descriptor heap for bindless resource access.
+    import descriptor;
+
+    /// Pipeline layout and pipeline creation (compute, graphics, ray-tracing).
+    import pipeline;
+
+    /// Image, image-view, and sampler creation.
+    import image;
+
+    /// Command buffer recording (dispatch, draw, copy, barriers, etc.).
+    import command-buffer;
+
+    /// Queue submission and synchronisation primitives.
+    import queue;
+
+    /// Fences, semaphores, and sharing modes.
+    import sync;
 }

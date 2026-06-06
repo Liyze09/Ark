@@ -1,0 +1,27 @@
+package ark:gpu@0.1.0;
+
+interface shader {
+    use core.{vulkan-error};
+
+    /// Describes a range of push constants accessible to one or more shader stages.
+    record push-constant-range {
+        /// VkShaderStageFlags — bitmask of shader stages that can access this range.
+        stage-flags: u32,
+        offset: u32,
+        size: u32,
+    }
+
+    /// A compiled Vulkan shader module, created from SPIR-V binary data.
+    resource shader-module { }
+
+    /// Create a shader module from SPIR-V words.
+    ///
+    /// `code` must contain valid SPIR-V binary, one `u32` per word.
+    shader-from-bytes: func(code: list<u32>) -> result<shader-module, vulkan-error>;
+
+    /// Load a SPIR-V shader from the extension package's virtual filesystem
+    /// and create a shader module.
+    ///
+    /// `path` is relative to the package root (e.g. `"shaders/comp.spv"`).
+    shader-from-package: func(path: string) -> result<shader-module, vulkan-error>;
+}

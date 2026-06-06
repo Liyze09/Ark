@@ -1,0 +1,57 @@
+package ark:gpu@0.1.0;
+
+interface pipeline {
+    use core.{vulkan-error};
+    use shader.{shader-module, push-constant-range};
+    use descriptor.{descriptor-heap};
+
+    /// Where a pipeline is bound in the command buffer.
+    enum pipeline-bind-point {
+        graphics,
+        compute,
+        ray-tracing,
+    }
+
+    /// Describes how a range of the descriptor heap maps to a shader set.
+    record descriptor-set-info {
+        /// The descriptor heap to bind.
+        heap: borrow<descriptor-heap>,
+        /// Set number in the shader (e.g. `set = 0`).
+        set: u32,
+        /// First index in the descriptor heap for this set.
+        first-index: u32,
+        /// Number of consecutive heap indices used by this set.
+        count: u32,
+    }
+
+    /// Layout combining descriptor heap bindings and push constant ranges.
+    resource pipeline-layout { }
+
+    /// Create a pipeline layout.
+    ///
+    /// `descriptor-sets` describes how descriptor heap ranges map to shader sets.
+    /// `push-constant-ranges` describes the push constant memory layout.
+    create-pipeline-layout: func(
+        descriptor-sets: list<descriptor-set-info>,
+        push-constant-ranges: list<push-constant-range>,
+    ) -> result<pipeline-layout, vulkan-error>;
+
+    /// A compiled compute pipeline, ready for dispatch.
+    resource compute-pipeline { }
+
+    /// Create a compute pipeline from a shader module and pipeline layout.
+    ///
+    /// `entry-point` is the name of the compute shader entry function
+    /// (e.g. `"main"`).
+    create-compute-pipeline: func(
+        layout: borrow<pipeline-layout>,
+        shader: borrow<shader-module>,
+        entry-point: string,
+    ) -> result<compute-pipeline, vulkan-error>;
+
+    /// A compiled graphics pipeline, ready for drawing.
+    resource graphics-pipeline { }
+
+    /// A ray-tracing pipeline, for ray generation, miss, hit, and callable shaders.
+    resource ray-tracing-pipeline { }
+}

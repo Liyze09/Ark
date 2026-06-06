@@ -20,6 +20,89 @@ use crate::{
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
+// ── Log/panic callback types (passed from Java via FFM upcall stubs) ──────────
+
+type LogFn = unsafe extern "C" fn(*const std::ffi::c_char);
+type FatalFn = unsafe extern "C" fn(*const std::ffi::c_char);
+
+struct LoggerFuncs {
+    trace: LogFn,
+    debug: LogFn,
+    info: LogFn,
+    warn: LogFn,
+    error: LogFn,
+}
+
+static LOGGER_FUNCS: std::sync::OnceLock<LoggerFuncs> = std::sync::OnceLock::new();
+static FATAL_HANDLER: std::sync::OnceLock<FatalFn> = std::sync::OnceLock::new();
+
+struct ArkLogger;
+
+impl log::Log for ArkLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::max_level()
+    }
+
+    fn log(&self, record: &log::Record) {
+        let Some(ref f) = LOGGER_FUNCS.get() else { return };
+        let msg = match CString::new(format!("{}", record.args())) {
+            Ok(c) => c,
+            Err(_) => CString::new("(log message contained null byte)").unwrap(),
+        };
+        let func = match record.level() {
+            log::Level::Trace => f.trace,
+            log::Level::Debug => f.debug,
+            log::Level::Info => f.info,
+            log::Level::Warn => f.warn,
+            log::Level::Error => f.error,
+        };
+        unsafe { (func)(msg.as_ptr()) };
+    }
+
+    fn flush(&self) {}
+}
+
+fn init_logger(trace: LogFn, debug: LogFn, info: LogFn, warn: LogFn, error: LogFn) -> bool {
+    let funcs = LoggerFuncs { trace, debug, info, warn, error };
+    if LOGGER_FUNCS.set(funcs).is_err() {
+        return false; // already initialized
+    }
+    let _ = log::set_logger(&ArkLogger);
+    log::set_max_level(log::LevelFilter::Trace);
+    true
+}
+
+fn invoke_fatal(msg: &str) {
+    if let Some(fatal) = FATAL_HANDLER.get() {
+        let cmsg = CString::new(msg).unwrap_or_else(|_| CString::new("(unknown)").unwrap());
+        unsafe { (fatal)(cmsg.as_ptr()) };
+    } else {
+        eprintln!("[Ark] FATAL (no handler): {msg}");
+    }
+}
+
+fn handle_ffi_panic(panic: Box<dyn std::any::Any + Send>) {
+    let msg = panic
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| format!("{:?}", panic));
+    invoke_fatal(&msg);
+}
+
+macro_rules! ffi_catch {
+    ($body:expr, $on_panic:expr) => {{
+        let __result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| $body));
+        match __result {
+            Ok(__v) => __v,
+            Err(__panic) => {
+                handle_ffi_panic(__panic);
+                $on_panic
+            }
+        }
+    }};
+}
+
 pub struct NativeContext {
     pub vulkan_backend: VkBackend,
     pub wasm_runtime: WasmRuntime,
@@ -70,7 +153,31 @@ impl NativeContext {
 }
 
 /// # Safety
+/// All function pointer parameters must be valid FFM upcall stubs.
+/// Must be called exactly once, immediately after loading the native library,
+/// before any other Ark functions. Both `OnceLock`s reject duplicate calls.
+/// Returns 0 on success, 1 if already initialized.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ark_init_callbacks(
+    log_trace: LogFn,
+    log_debug: LogFn,
+    log_info: LogFn,
+    log_warn: LogFn,
+    log_error: LogFn,
+    fatal_handler: FatalFn,
+) -> i32 {
+    // Register fatal handler FIRST so it's available if logger init panics
+    let _ = FATAL_HANDLER.set(fatal_handler);
+    if init_logger(log_trace, log_debug, log_info, log_warn, log_error) {
+        0
+    } else {
+        1 // already initialized
+    }
+}
+
+/// # Safety
 /// All parameters must be valid Vulkan object handles.
+/// `ark_init_callbacks` must have been called first.
 /// Returns a pointer to a heap-allocated `NativeContext` as an `i64`, or `0` on failure.
 /// Designed for Java FFM API interop — callers must eventually free the returned pointer
 /// via `ark_destroy_native_context`.
@@ -91,36 +198,47 @@ pub unsafe extern "C" fn ark_create_native_context(
             .to_string_lossy()
             .into_owned()
     };
-    let result = unsafe {
-        NativeContext::new(
-            std::mem::transmute::<usize, vk::Instance>(instance_handle as usize),
-            std::mem::transmute::<usize, vk::Device>(device_handle as usize),
-            std::mem::transmute::<usize, VmaAllocator>(vma_handle as usize),
-            std::mem::transmute::<usize, vk::Queue>(transfer_queue as usize),
-            std::mem::transmute::<usize, vk::Queue>(graphics_queue as usize),
-            std::mem::transmute::<usize, vk::Queue>(compute_queue as usize),
-            folder,
-        )
-    };
-    match result {
-        Ok(ctx) => {
-            let ptr = Box::into_raw(Box::new(ctx));
-            ptr as i64
-        }
-        Err(e) => {
-            eprintln!("[Ark] Failed to create NativeContext: {e}");
-            0
-        }
-    }
+
+    ffi_catch!(
+        {
+            let result = unsafe {
+                NativeContext::new(
+                    std::mem::transmute::<usize, vk::Instance>(instance_handle as usize),
+                    std::mem::transmute::<usize, vk::Device>(device_handle as usize),
+                    std::mem::transmute::<usize, VmaAllocator>(vma_handle as usize),
+                    std::mem::transmute::<usize, vk::Queue>(transfer_queue as usize),
+                    std::mem::transmute::<usize, vk::Queue>(graphics_queue as usize),
+                    std::mem::transmute::<usize, vk::Queue>(compute_queue as usize),
+                    folder,
+                )
+            };
+            match result {
+                Ok(ctx) => {
+                    let ptr = Box::into_raw(Box::new(ctx));
+                    ptr as i64
+                }
+                Err(e) => {
+                    log::error!("Failed to create NativeContext: {e}");
+                    0i64
+                }
+            }
+        },
+        0i64
+    )
 }
 
 /// # Safety
 /// `ptr` must be a pointer previously returned by `ark_create_native_context`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ark_destroy_native_context(ptr: i64) {
-    if ptr != 0 {
-        drop(unsafe { Box::from_raw(ptr as *mut NativeContext) });
-    }
+    ffi_catch!(
+        {
+            if ptr != 0 {
+                drop(unsafe { Box::from_raw(ptr as *mut NativeContext) });
+            }
+        },
+        ()
+    )
 }
 
 /// # Safety
@@ -134,30 +252,35 @@ pub unsafe extern "C" fn ark_load_extension(
     file_name: *const std::ffi::c_char,
     wasi_features_json: *const std::ffi::c_char,
 ) -> i32 {
-    let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
-    let file_name = unsafe { CStr::from_ptr(file_name) }.to_string_lossy();
-    let wasi_features: Vec<String> = if wasi_features_json.is_null() {
-        Vec::new()
-    } else {
-        let json = unsafe { CStr::from_ptr(wasi_features_json) }.to_string_lossy();
-        match serde_json::from_str(&json) {
-            Ok(v) => v,
-            Err(e) => {
-                ctx.push_error(anyhow::anyhow!("Failed to parse wasi_features JSON: {}", e));
-                return 1;
+    ffi_catch!(
+        {
+            let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
+            let file_name = unsafe { CStr::from_ptr(file_name) }.to_string_lossy();
+            let wasi_features: Vec<String> = if wasi_features_json.is_null() {
+                Vec::new()
+            } else {
+                let json = unsafe { CStr::from_ptr(wasi_features_json) }.to_string_lossy();
+                match serde_json::from_str(&json) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        ctx.push_error(anyhow::anyhow!("Failed to parse wasi_features JSON: {}", e));
+                        return 1;
+                    }
+                }
+            };
+            match ctx.wasm_runtime.load_extension(
+                file_name.as_ref(),
+                LaunchArgs { enabled_wasi_features: wasi_features, ..Default::default() },
+            ) {
+                Ok(_) => 0,
+                Err(e) => {
+                    ctx.push_error(e);
+                    1
+                }
             }
-        }
-    };
-    match ctx.wasm_runtime.load_extension(
-        file_name.as_ref(),
-        LaunchArgs { enabled_wasi_features: wasi_features, ..Default::default() },
-    ) {
-        Ok(_) => 0,
-        Err(e) => {
-            ctx.push_error(e);
-            1
-        }
-    }
+        },
+        1
+    )
 }
 
 /// # Safety
@@ -165,15 +288,20 @@ pub unsafe extern "C" fn ark_load_extension(
 /// `id` must be a valid C string. Returns 0 on success, 1 on failure.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ark_initialize_extension(ptr: i64, id: *const std::ffi::c_char) -> i32 {
-    let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
-    let id = unsafe { CStr::from_ptr(id) }.to_string_lossy();
-    match ctx.wasm_runtime.initialize_extension(&id) {
-        Ok(_) => 0,
-        Err(e) => {
-            ctx.push_error(e);
-            1
-        }
-    }
+    ffi_catch!(
+        {
+            let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
+            let id = unsafe { CStr::from_ptr(id) }.to_string_lossy();
+            match ctx.wasm_runtime.initialize_extension(&id) {
+                Ok(_) => 0,
+                Err(e) => {
+                    ctx.push_error(e);
+                    1
+                }
+            }
+        },
+        1
+    )
 }
 
 /// # Safety
@@ -181,14 +309,19 @@ pub unsafe extern "C" fn ark_initialize_extension(ptr: i64, id: *const std::ffi:
 /// Returns 0 on success, 1 on failure.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ark_initialize_extensions(ptr: i64) -> i32 {
-    let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
-    match ctx.wasm_runtime.initialize_extensions() {
-        Ok(_) => 0,
-        Err(e) => {
-            ctx.push_error(e);
-            1
-        }
-    }
+    ffi_catch!(
+        {
+            let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
+            match ctx.wasm_runtime.initialize_extensions() {
+                Ok(_) => 0,
+                Err(e) => {
+                    ctx.push_error(e);
+                    1
+                }
+            }
+        },
+        1
+    )
 }
 
 /// # Safety
@@ -196,15 +329,20 @@ pub unsafe extern "C" fn ark_initialize_extensions(ptr: i64) -> i32 {
 /// `id` must be a valid C string. Returns 0 on success, 1 on failure.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ark_disable_extension(ptr: i64, id: *const std::ffi::c_char) -> i32 {
-    let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
-    let id = unsafe { CStr::from_ptr(id) }.to_string_lossy();
-    match ctx.wasm_runtime.disable_extension(&id) {
-        Ok(_) => 0,
-        Err(e) => {
-            ctx.push_error(e);
-            1
-        }
-    }
+    ffi_catch!(
+        {
+            let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
+            let id = unsafe { CStr::from_ptr(id) }.to_string_lossy();
+            match ctx.wasm_runtime.disable_extension(&id) {
+                Ok(_) => 0,
+                Err(e) => {
+                    ctx.push_error(e);
+                    1
+                }
+            }
+        },
+        1
+    )
 }
 
 /// # Safety
@@ -212,15 +350,20 @@ pub unsafe extern "C" fn ark_disable_extension(ptr: i64, id: *const std::ffi::c_
 /// `id` must be a valid C string. Returns 0 on success, 1 on failure.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ark_unload_extension(ptr: i64, id: *const std::ffi::c_char) -> i32 {
-    let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
-    let id = unsafe { CStr::from_ptr(id) }.to_string_lossy();
-    match ctx.wasm_runtime.unload_extension(&id) {
-        Ok(_) => 0,
-        Err(e) => {
-            ctx.push_error(e);
-            1
-        }
-    }
+    ffi_catch!(
+        {
+            let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
+            let id = unsafe { CStr::from_ptr(id) }.to_string_lossy();
+            match ctx.wasm_runtime.unload_extension(&id) {
+                Ok(_) => 0,
+                Err(e) => {
+                    ctx.push_error(e);
+                    1
+                }
+            }
+        },
+        1
+    )
 }
 
 /// # Safety
@@ -229,33 +372,48 @@ pub unsafe extern "C" fn ark_unload_extension(ptr: i64, id: *const std::ffi::c_c
 /// or null if no errors are stored. The caller must free the string via `ark_free_string`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ark_pop_error(ptr: i64) -> *mut std::ffi::c_char {
-    let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
-    match ctx.pop_error() {
-        Some(err) => {
-            let msg = format!("{err:#}");
-            CString::new(msg)
-                .unwrap_or_else(|_| CString::new("error contains nul byte").unwrap())
-                .into_raw()
-        }
-        None => std::ptr::null_mut(),
-    }
+    ffi_catch!(
+        {
+            let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
+            match ctx.pop_error() {
+                Some(err) => {
+                    let msg = format!("{err:#}");
+                    CString::new(msg)
+                        .unwrap_or_else(|_| CString::new("error contains nul byte").unwrap())
+                        .into_raw()
+                }
+                None => std::ptr::null_mut(),
+            }
+        },
+        std::ptr::null_mut()
+    )
 }
 
 /// # Safety
 /// `ptr` must be a valid pointer returned by `ark_create_native_context`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ark_error_count(ptr: i64) -> i32 {
-    let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
-    ctx.error_count() as i32
+    ffi_catch!(
+        {
+            let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
+            ctx.error_count() as i32
+        },
+        0
+    )
 }
 
 /// # Safety
 /// `ptr` must be a string previously returned by `ark_pop_error`, or null (no-op).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ark_free_string(ptr: *mut std::ffi::c_char) {
-    if !ptr.is_null() {
-        drop(unsafe { CString::from_raw(ptr) });
-    }
+    ffi_catch!(
+        {
+            if !ptr.is_null() {
+                drop(unsafe { CString::from_raw(ptr) });
+            }
+        },
+        ()
+    )
 }
 
 /// # Safety
@@ -268,23 +426,28 @@ pub unsafe extern "C" fn ark_set_enabled_vulkan_features(
     ptr: i64,
     json: *const std::ffi::c_char,
 ) -> i32 {
-    let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
-    let features: Vec<String> = if json.is_null() {
-        Vec::new()
-    } else {
-        let json_str = unsafe { CStr::from_ptr(json) }.to_string_lossy();
-        match serde_json::from_str(&json_str) {
-            Ok(v) => v,
-            Err(e) => {
-                ctx.push_error(anyhow::anyhow!("Failed to parse enabled vulkan features JSON: {e}"));
-                return 1;
-            }
-        }
-    };
-    let mut set = ctx.wasm_runtime.enabled_vulkan_features.lock();
-    set.clear();
-    set.extend(features);
-    0
+    ffi_catch!(
+        {
+            let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
+            let features: Vec<String> = if json.is_null() {
+                Vec::new()
+            } else {
+                let json_str = unsafe { CStr::from_ptr(json) }.to_string_lossy();
+                match serde_json::from_str(&json_str) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        ctx.push_error(anyhow::anyhow!("Failed to parse enabled vulkan features JSON: {e}"));
+                        return 1;
+                    }
+                }
+            };
+            let mut set = ctx.wasm_runtime.enabled_vulkan_features.lock();
+            set.clear();
+            set.extend(features);
+            0
+        },
+        1
+    )
 }
 
 /// # Safety
@@ -297,21 +460,26 @@ pub unsafe extern "C" fn ark_set_enabled_vulkan_extensions(
     ptr: i64,
     json: *const std::ffi::c_char,
 ) -> i32 {
-    let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
-    let extensions: Vec<String> = if json.is_null() {
-        Vec::new()
-    } else {
-        let json_str = unsafe { CStr::from_ptr(json) }.to_string_lossy();
-        match serde_json::from_str(&json_str) {
-            Ok(v) => v,
-            Err(e) => {
-                ctx.push_error(anyhow::anyhow!("Failed to parse enabled vulkan extensions JSON: {e}"));
-                return 1;
-            }
-        }
-    };
-    let mut set = ctx.wasm_runtime.enabled_vulkan_extensions.lock();
-    set.clear();
-    set.extend(extensions);
-    0
+    ffi_catch!(
+        {
+            let ctx = unsafe { &mut *(ptr as *mut NativeContext) };
+            let extensions: Vec<String> = if json.is_null() {
+                Vec::new()
+            } else {
+                let json_str = unsafe { CStr::from_ptr(json) }.to_string_lossy();
+                match serde_json::from_str(&json_str) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        ctx.push_error(anyhow::anyhow!("Failed to parse enabled vulkan extensions JSON: {e}"));
+                        return 1;
+                    }
+                }
+            };
+            let mut set = ctx.wasm_runtime.enabled_vulkan_extensions.lock();
+            set.clear();
+            set.extend(extensions);
+            0
+        },
+        1
+    )
 }
