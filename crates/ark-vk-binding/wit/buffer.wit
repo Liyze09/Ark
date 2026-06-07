@@ -45,6 +45,20 @@ interface buffer {
     resource buffer {
         read: func(start: u64, len: u64) -> result<list<u8>, vulkan-error>;
         write: func(start: u64, data: list<u8>) -> result<_, vulkan-error>;
+        /// Gain persistent mapped access to a buffer.  The returned accessor
+        /// keeps the mapping alive until dropped.
+        access: func() -> result<buffer-accessor, vulkan-error>;
+    }
+
+    /// A persistently-mapped view of a buffer for repeated reads/writes
+    /// without the overhead of map/unmap on every call.
+    ///
+    /// Created via `access()`.  The underlying buffer must remain alive
+    /// while the accessor exists — dropping the buffer while an accessor
+    /// is live is a guest error caught by the runtime.
+    resource buffer-accessor {
+        read: func(start: u64, len: u64) -> result<list<u8>, vulkan-error>;
+        write: func(start: u64, data: list<u8>) -> result<_, vulkan-error>;
     }
 
     buffer-from-data: func(create-info: buffer-create-info, allocate-info: allocate-info,data: list<u8>) -> result<buffer, vulkan-error>;

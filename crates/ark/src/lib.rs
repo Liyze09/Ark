@@ -1,5 +1,4 @@
-pub mod extension;
-pub mod vulkan;
+use ark_runtime::{LaunchArgs, VkBackend, WasmRuntime};
 
 use std::ffi::{CStr, CString};
 
@@ -12,10 +11,6 @@ use vulkanalia::{
 };
 use vulkanalia_vma::vma::VmaAllocator;
 
-use crate::{
-    extension::wasm::{LaunchArgs, WasmRuntime},
-    vulkan::VkBackend,
-};
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -44,7 +39,7 @@ impl log::Log for ArkLogger {
     }
 
     fn log(&self, record: &log::Record) {
-        let Some(ref f) = LOGGER_FUNCS.get() else { return };
+        let Some(f) = LOGGER_FUNCS.get() else { return };
         let msg = match CString::new(format!("{}", record.args())) {
             Ok(c) => c,
             Err(_) => CString::new("(log message contained null byte)").unwrap(),
@@ -111,14 +106,18 @@ pub struct NativeContext {
 
 impl NativeContext {
     /// # Safety
-    ///  - `instance_handle`, `device_handle`, `vma_handle`, `transfer_queue`, `graphics_queue`, `compute_queue` must be valid pointers to Vulkan objects.
+    ///  - `instance_handle`, `device_handle`, `vma_handle`, `graphics_queue`, `compute_queue`, `transfer_queue` must be valid pointers to Vulkan objects.
+    #[allow(clippy::too_many_arguments)]
     pub unsafe fn new(
         instance: vk::Instance,
         device: vk::Device,
         vma: VmaAllocator,
-        transfer_queue: vk::Queue,
         graphics_queue: vk::Queue,
         compute_queue: vk::Queue,
+        transfer_queue: vk::Queue,
+        graphics_queue_family_index: u32,
+        compute_queue_family_index: u32,
+        transfer_queue_family_index: u32,
         extension_folder: String,
     ) -> anyhow::Result<Self> {
         let loader = unsafe { LibloadingLoader::new(LIBRARY)? };
@@ -131,6 +130,9 @@ impl NativeContext {
             transfer_queue,
             graphics_queue,
             compute_queue,
+            graphics_queue_family_index,
+            compute_queue_family_index,
+            transfer_queue_family_index,
         };
         Ok(Self {
             wasm_runtime: WasmRuntime::new(extension_folder, vulkan_backend.clone())?,
@@ -186,9 +188,12 @@ pub unsafe extern "C" fn ark_create_native_context(
     instance_handle: i64,
     device_handle: i64,
     vma_handle: i64,
-    transfer_queue: i64,
     graphics_queue: i64,
     compute_queue: i64,
+    transfer_queue: i64,
+    graphics_queue_family_index: i32,
+    compute_queue_family_index: i32,
+    transfer_queue_family_index: i32,
     extension_folder: *const std::ffi::c_char,
 ) -> i64 {
     let folder = if extension_folder.is_null() {
@@ -206,9 +211,12 @@ pub unsafe extern "C" fn ark_create_native_context(
                     std::mem::transmute::<usize, vk::Instance>(instance_handle as usize),
                     std::mem::transmute::<usize, vk::Device>(device_handle as usize),
                     std::mem::transmute::<usize, VmaAllocator>(vma_handle as usize),
-                    std::mem::transmute::<usize, vk::Queue>(transfer_queue as usize),
                     std::mem::transmute::<usize, vk::Queue>(graphics_queue as usize),
                     std::mem::transmute::<usize, vk::Queue>(compute_queue as usize),
+                    std::mem::transmute::<usize, vk::Queue>(transfer_queue as usize),
+                    graphics_queue_family_index as u32,
+                    compute_queue_family_index as u32,
+                    transfer_queue_family_index as u32,
                     folder,
                 )
             };

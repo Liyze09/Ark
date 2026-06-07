@@ -1,7 +1,7 @@
 package io.github.liyze09.ark;
 
+import com.mojang.blaze3d.vulkan.VulkanQueue;
 import io.github.liyze09.ark.exception.FatalNativeException;
-import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
@@ -101,10 +101,11 @@ public final class NativeContext {
                     createSymbol,
                     FunctionDescriptor.of(
                             ValueLayout.JAVA_LONG,
-                            ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG,
-                            ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG,
-                            ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG,
-                            ValueLayout.ADDRESS
+                            ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG,   // instance, device
+                            ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG,   // vma, graphicsQueue
+                            ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG,   // computeQueue, transferQueue
+                            ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,     // graphicsQFI, computeQFI
+                            ValueLayout.JAVA_INT, ValueLayout.ADDRESS       // transferQFI, path
                     )
             );
 
@@ -231,7 +232,6 @@ public final class NativeContext {
      * Called by the static {@link #onFatal} callback (from native panic handler).
      * Collects all pending errors from the Rust side exactly once, then marks
      * this context as defunct.
-     *
      * Must not call {@link #destroy()} because the native call that triggered
      * the panic is still on the stack — the context is freed later in {@link #exit()}.
      */
@@ -301,7 +301,7 @@ public final class NativeContext {
     // ── Factory ────────────────────────────────────────────────────────────
     public static @Nullable NativeContext create(
             long instanceHandle, long deviceHandle, long vmaHandle,
-            long transferQueue, long graphicsQueue, long computeQueue,
+            VulkanQueue graphicsQueue, VulkanQueue computeQueue, VulkanQueue transferQueue,
             Path extensionFolder
     ) {
         try (var arena = Arena.ofConfined()) {
@@ -309,7 +309,12 @@ public final class NativeContext {
 
             long address = (long) CREATE_NATIVE_CONTEXT.invokeExact(
                     instanceHandle, deviceHandle, vmaHandle,
-                    transferQueue, graphicsQueue, computeQueue,
+                    graphicsQueue.vkQueue().address(),
+                    computeQueue.vkQueue().address(),
+                    transferQueue.vkQueue().address(),
+                    graphicsQueue.queueFamilyIndex(),
+                    computeQueue.queueFamilyIndex(),
+                    transferQueue.queueFamilyIndex(),
                     pathSegment
             );
 

@@ -3,7 +3,7 @@ package ark:gpu@0.1.0;
 interface command-buffer {
     use core.{vulkan-error, queue-family};
     use pipeline.{pipeline-bind-point, pipeline-layout, compute-pipeline, graphics-pipeline, ray-tracing-pipeline};
-    use descriptor.{descriptor-heap};
+    use descriptor.{descriptor-set};
     use buffer.{buffer};
     use image.{image, image-view, image-aspect-flags, image-subresource-range, extent3d, filter};
 
@@ -205,18 +205,17 @@ interface command-buffer {
         /// Bind a ray-tracing pipeline for subsequent trace rays commands.
         bind-ray-tracing-pipeline: func(pipeline: borrow<ray-tracing-pipeline>) -> result<_, vulkan-error>;
 
-        // ── Descriptor heap binding ──
+        // ── Descriptor set binding ──
 
-        /// Bind descriptor heap indices to the given pipeline's descriptor sets.
+        /// Bind descriptor sets for subsequent draw/dispatch commands.
         ///
-        /// `descriptor-indices` maps each set (starting at `first-set`) to a
-        /// contiguous range of heap slots.  The length of the list determines
-        /// how many consecutive sets are bound.
-        bind-descriptor-heap: func(
+        /// `first-set` is the set number corresponding to `sets[0]`
+        /// (e.g. if `first-set` is 2, then `sets[0]` goes to set=2).
+        bind-descriptor-sets: func(
             bind-point: pipeline-bind-point,
             layout: borrow<pipeline-layout>,
             first-set: u32,
-            descriptor-indices: list<u32>,
+            sets: list<borrow<descriptor-set>>,
         ) -> result<_, vulkan-error>;
 
         // ── Push constants ──
@@ -237,15 +236,6 @@ interface command-buffer {
 
         /// Indirect dispatch with parameters stored in a buffer.
         dispatch-indirect: func(buffer: borrow<buffer>, offset: u64) -> result<_, vulkan-error>;
-
-        /// Indirect dispatch with draw count sourced from a buffer.
-        dispatch-indirect-count: func(
-            buffer: borrow<buffer>,
-            offset: u64,
-            count-buffer: borrow<buffer>,
-            count-offset: u64,
-            max-draw-count: u32,
-        ) -> result<_, vulkan-error>;
 
         // ── Draw (graphics) ──
 

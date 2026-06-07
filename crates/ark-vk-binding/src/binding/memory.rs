@@ -1,12 +1,18 @@
 use vulkanalia::vk;
 use vulkanalia_vma::{AllocationCreateFlags, AllocationOptions, MemoryUsage};
 
-use crate::{VkContextView, binding::ark::gpu::memory::{AllocateInfo, MemoryType}};
+use crate::{
+    binding::ark::gpu::memory::{AllocateInfo, MemoryType},
+    VkContextView,
+};
 
 impl VkContextView<'_> {
     #[inline]
     pub fn vma(&self) -> &vulkanalia_vma::Allocator {
-        unsafe { &*(&self.owned.vma as *const vulkanalia_vma::vma::VmaAllocator as *const vulkanalia_vma::Allocator) }
+        unsafe {
+            &*(&self.owned.vma as *const vulkanalia_vma::vma::VmaAllocator
+                as *const vulkanalia_vma::Allocator)
+        }
     }
 }
 

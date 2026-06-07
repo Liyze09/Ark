@@ -1,5 +1,11 @@
 pub mod buffer;
+pub mod command;
+pub mod descriptor;
+pub mod image;
 pub mod memory;
+pub mod pipeline;
+pub mod queue;
+pub mod shader;
 pub mod sync;
 
 use vulkanalia::vk;
@@ -12,7 +18,7 @@ bindgen!({
     anyhow: true,
 });
 
-fn vk_err(err: vk::ErrorCode) -> VulkanError {
+pub(crate) fn vk_err(err: vk::ErrorCode) -> VulkanError {
     match err.as_raw() {
         1 => VulkanError::NotReady,
         2 => VulkanError::Timeout,

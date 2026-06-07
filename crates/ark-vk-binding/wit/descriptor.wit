@@ -5,7 +5,7 @@ interface descriptor {
     use image.{image-view, sampler};
     use buffer.{buffer};
 
-    /// Supported descriptor types for the heap.
+    /// Supported descriptor types.
     enum descriptor-type {
         sampler,
         combined-image-sampler,
@@ -18,53 +18,132 @@ interface descriptor {
         input-attachment,
     }
 
-    /// Per-type capacity for the descriptor heap.
-    record heap-pool-size {
-        descriptor-type: descriptor-type,
-        count: u32,
+    /// Additional per-binding options.
+    ///
+    /// Bitmask matching `VkDescriptorBindingFlags`.
+    flags descriptor-binding-flags {
+        update-after-bind,
+        update-unused-while-pending,
+        partially-bound,
+        variable-descriptor-count,
     }
 
-    /// A descriptor heap — a global pool of descriptor slots backed by
-    /// VK_EXT_descriptor_indexing.
-    ///
-    /// Descriptors are written at specific heap indices and referenced by
-    /// shaders via `descriptor_index`.  Internally manages one or more
-    /// update-after-bind descriptor sets, but the complexity is hidden
-    /// from the guest.
-    resource descriptor-heap { }
+    /// A single binding in a descriptor set layout.
+    record descriptor-binding {
+        /// Binding number (matches the `layout(binding = N)` in the shader).
+        binding: u32,
+        /// The type of descriptor.
+        descriptor-type: descriptor-type,
+        /// Number of descriptors in this binding (for arrays).
+        descriptor-count: u32,
+        /// `VkShaderStageFlags` — which stages can access this binding.
+        stage-flags: u32,
+        /// Per-binding flags (update-after-bind, partially-bound, etc.).
+        binding-flags: descriptor-binding-flags,
+    }
 
-    /// Create a descriptor heap with the given per-type capacities.
-    ///
-    /// The guest can write descriptors at any index up to the declared
-    /// count for each type.
-    create-descriptor-heap: func(sizes: list<heap-pool-size>) -> result<descriptor-heap, vulkan-error>;
+    // ── Descriptor Set Layout ──
 
-    /// Describes a buffer to be written into a heap slot.
+    /// Describes the bindings in a descriptor set.
+    ///
+    /// This is the `VkDescriptorSetLayout` equivalent.
+    resource descriptor-set-layout { }
+
+    /// Create a descriptor set layout from a list of bindings.
+    ///
+    /// Bindings with `variable-descriptor-count` are allocated with the
+    /// count specified here as the *maximum*; the actual count is
+    /// specified when allocating the descriptor set.
+    create-descriptor-set-layout: func(bindings: list<descriptor-binding>) -> result<descriptor-set-layout, vulkan-error>;
+
+    // ── Descriptor Pool ──
+
+    /// Pool create flags matching `VkDescriptorPoolCreateFlags`.
+    flags descriptor-pool-create-flags {
+        /// Allow descriptor sets allocated from this pool to be updated
+        /// after they are bound to a command buffer.
+        update-after-bind,
+        /// Allow individual descriptor sets to be freed.
+        free-descriptor-set,
+    }
+
+    /// Per-type capacity for a descriptor pool.
+    record pool-size {
+        descriptor-type: descriptor-type,
+        descriptor-count: u32,
+    }
+
+    /// Allocates descriptor sets.
+    ///
+    /// This is the `VkDescriptorPool` equivalent.
+    resource descriptor-pool { }
+
+    /// Create a descriptor pool.
+    ///
+    /// `max-sets` — maximum number of descriptor sets that can be allocated.
+    /// `pool-sizes` — maximum number of descriptors of each type.
+    create-descriptor-pool: func(
+        max-sets: u32,
+        pool-sizes: list<pool-size>,
+        create-flags: descriptor-pool-create-flags,
+    ) -> result<descriptor-pool, vulkan-error>;
+
+    // ── Descriptor Set ──
+
+    /// An allocated descriptor set with concrete descriptor bindings.
+    resource descriptor-set { }
+
+    /// Allocate one descriptor set from a pool with a given layout.
+    ///
+    /// `variable-descriptor-counts` specifies the actual descriptor count
+    /// for each binding that has `variable-descriptor-count` in the layout,
+    /// in binding-number order.  Must be empty if no variable-count bindings
+    /// exist.
+    allocate-descriptor-set: func(
+        pool: borrow<descriptor-pool>,
+        layout: borrow<descriptor-set-layout>,
+        variable-descriptor-counts: list<u32>,
+    ) -> result<descriptor-set, vulkan-error>;
+
+    // ── Descriptor Write ──
+
+    /// Describes a buffer to be written into a descriptor.
     record buffer-descriptor-info {
         buffer: borrow<buffer>,
         offset: u64,
         range: u64,
     }
 
-    /// Describes an image to be written into a heap slot.
+    /// Describes an image to be written into a descriptor.
     record image-descriptor-info {
         image-view: borrow<image-view>,
-        /// VkImageLayout value (e.g. `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL`).
+        /// `VkImageLayout`.
         image-layout: u32,
         sampler: option<borrow<sampler>>,
     }
 
-    /// A single write into a descriptor heap slot.
+    /// A single descriptor write targeting a binding within a set.
     record descriptor-write {
-        /// Target index in the heap (the `descriptor_index` the shader will use).
-        heap-index: u32,
+        /// Binding number within the set.
+        binding: u32,
+        /// First array element to update.
+        dst-array-element: u32,
+        /// Number of descriptors to update.
+        descriptor-count: u32,
+        /// The type must match the layout binding's type.
         descriptor-type: descriptor-type,
+        /// Buffer descriptor (for buffer types).
         buffer-info: option<buffer-descriptor-info>,
+        /// Image descriptor (for image/sampler types).
         image-info: option<image-descriptor-info>,
     }
 
-    /// Write descriptors into heap slots at the given indices.
+    /// Write descriptors into a set.
     ///
-    /// All writes in one call are batched atomically.
-    write-descriptors: func(heap: borrow<descriptor-heap>, writes: list<descriptor-write>) -> result<_, vulkan-error>;
+    /// All writes in one call are batched into a single
+    /// `vkUpdateDescriptorSets` call.
+    write-descriptor-set: func(
+        set: borrow<descriptor-set>,
+        writes: list<descriptor-write>,
+    ) -> result<_, vulkan-error>;
 }

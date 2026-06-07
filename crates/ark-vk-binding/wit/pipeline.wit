@@ -3,7 +3,7 @@ package ark:gpu@0.1.0;
 interface pipeline {
     use core.{vulkan-error};
     use shader.{shader-module, push-constant-range};
-    use descriptor.{descriptor-heap};
+    use descriptor.{descriptor-set-layout};
 
     /// Where a pipeline is bound in the command buffer.
     enum pipeline-bind-point {
@@ -12,24 +12,20 @@ interface pipeline {
         ray-tracing,
     }
 
-    /// Describes how a range of the descriptor heap maps to a shader set.
+    /// Describes how a descriptor set layout maps to a shader set.
     record descriptor-set-info {
-        /// The descriptor heap to bind.
-        heap: borrow<descriptor-heap>,
+        /// The descriptor set layout for this set.
+        layout: borrow<descriptor-set-layout>,
         /// Set number in the shader (e.g. `set = 0`).
         set: u32,
-        /// First index in the descriptor heap for this set.
-        first-index: u32,
-        /// Number of consecutive heap indices used by this set.
-        count: u32,
     }
 
-    /// Layout combining descriptor heap bindings and push constant ranges.
+    /// Layout combining descriptor set layouts and push constant ranges.
     resource pipeline-layout { }
 
     /// Create a pipeline layout.
     ///
-    /// `descriptor-sets` describes how descriptor heap ranges map to shader sets.
+    /// `descriptor-sets` maps descriptor set layouts to shader set numbers.
     /// `push-constant-ranges` describes the push constant memory layout.
     create-pipeline-layout: func(
         descriptor-sets: list<descriptor-set-info>,

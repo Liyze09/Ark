@@ -81,6 +81,7 @@ pub struct WasmRuntime {
     pub registry: Registry,
     pub extension_folder: String,
     pub vulkan: VkBackend,
+    pub vk_ctx: ark_vk_binding::VkContextOwned,
     pub enabled_vulkan_features: Arc<Mutex<HashSet<String>>>,
     pub enabled_vulkan_extensions: Arc<Mutex<HashSet<String>>>,
 }
@@ -98,6 +99,19 @@ pub struct ExtensionContext {
     pub public_registry: Registry,
     pub enabled_vulkan_features: Arc<Mutex<HashSet<String>>>,
     pub enabled_vulkan_extensions: Arc<Mutex<HashSet<String>>>,
+    pub vk_ctx: ark_vk_binding::VkContextOwned,
+}
+
+unsafe impl Send for ExtensionContext {}
+
+impl ark_vk_binding::VkView for ExtensionContext {
+    fn ctx(&mut self) -> ark_vk_binding::VkContextView<'_> {
+        ark_vk_binding::VkContextView {
+            owned: &self.vk_ctx,
+            table: &mut self.table,
+            files: &self.package.files,
+        }
+    }
 }
 
 impl HasData for ExtensionContext {
@@ -115,10 +129,12 @@ impl WasmRuntime {
         config.cache(Some(cache));
         config.coredump_on_trap(true);
 
+        let vk_ctx = unsafe { vulkan.to_vk_context() };
         let engine = Engine::new(&config)?;
         let mut linker = Linker::<ExtensionContext>::new(&engine);
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
         binding::add_to_linker(&mut linker)?;
+        ark_vk_binding::add_to_linker(&mut linker)?;
         Ok(Self {
             linker,
             engine,
@@ -126,6 +142,7 @@ impl WasmRuntime {
             registry: Arc::new(Mutex::new(HashMap::new())),
             extension_folder,
             vulkan,
+            vk_ctx,
             enabled_vulkan_features: Arc::new(Mutex::new(HashSet::new())),
             enabled_vulkan_extensions: Arc::new(Mutex::new(HashSet::new())),
         })
@@ -182,6 +199,7 @@ impl WasmRuntime {
             });
         }
 
+        let vk_ctx = unsafe { self.vulkan.to_vk_context() };
         let mut store = Store::new(
             &self.engine,
             ExtensionContext {
@@ -191,6 +209,7 @@ impl WasmRuntime {
                 public_registry: self.registry.clone(),
                 enabled_vulkan_features: self.enabled_vulkan_features.clone(),
                 enabled_vulkan_extensions: self.enabled_vulkan_extensions.clone(),
+                vk_ctx,
             },
         );
         let ext_id = store.data().package.manifest.id.clone();

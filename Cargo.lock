@@ -66,9 +66,22 @@ name = "ark"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ark-vk-binding",
+ "ark-runtime",
  "log",
  "mimalloc",
+ "parking_lot",
+ "serde_json",
+ "vulkanalia",
+ "vulkanalia-vma",
+]
+
+[[package]]
+name = "ark-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ark-vk-binding",
+ "log",
  "parking_lot",
  "serde",
  "serde_json",

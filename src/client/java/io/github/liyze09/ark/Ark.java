@@ -36,13 +36,13 @@ public class Ark implements ClientModInitializer {
         var vkInstance = backend.instance().vkInstance().address();
         var vkDevice = backend.vkDevice().address();
         var vma = backend.vma();
-        var graphicsQueue = backend.graphicsQueue().vkQueue().address();
-        var computeQueue = backend.computeQueue().vkQueue().address();
-        var transferQueue = backend.transferQueue().vkQueue().address();
+        var graphicsQueue = backend.graphicsQueue();
+        var computeQueue = backend.computeQueue();
+        var transferQueue = backend.transferQueue();
 
         nativeContext = NativeContext.create(
                 vkInstance, vkDevice, vma,
-                transferQueue, graphicsQueue, computeQueue,
+                graphicsQueue, computeQueue, transferQueue,
                 ExtensionLoader.extensionPath
         );
         if (nativeContext == null) {
