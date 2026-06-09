@@ -58,8 +58,6 @@ interface core {
 /// commands, and synchronisation primitives defined in the `ark:gpu`
 /// package, together with WASI clocks for timing.
 world vulkan {
-    include wasi:clocks/imports@0.2.11;
-
     /// Buffer and image memory allocation hints.
     import memory;
 

@@ -17,7 +17,6 @@ mimalloc = "0.1.52"
 serde_json = "1.0.150"
 parking_lot = "0.12.5"
 
-
 [profile.dev]
 opt-level = 1
 

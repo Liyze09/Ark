@@ -2,6 +2,8 @@ package io.github.liyze09.ark;
 
 import com.mojang.blaze3d.vulkan.VulkanQueue;
 import io.github.liyze09.ark.exception.FatalNativeException;
+import io.github.liyze09.ark.exception.NativeException;
+import org.jetbrains.annotations.NotNull;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
@@ -299,7 +301,7 @@ public final class NativeContext {
     }
 
     // ── Factory ────────────────────────────────────────────────────────────
-    public static @Nullable NativeContext create(
+    public static @NotNull NativeContext create(
             long instanceHandle, long deviceHandle, long vmaHandle,
             VulkanQueue graphicsQueue, VulkanQueue computeQueue, VulkanQueue transferQueue,
             Path extensionFolder
@@ -320,7 +322,7 @@ public final class NativeContext {
 
             if (address == 0) {
                 Ark.LOGGER.error("ark_create_native_context returned null");
-                return null;
+                throw new FatalNativeException("Failed to create Ark native context due to unknown error.");
             }
 
             return new NativeContext(address);
@@ -403,8 +405,6 @@ public final class NativeContext {
                 errors.add(err);
             }
             return errors;
-        } catch (FatalNativeException e) {
-            throw e;
         } finally {
             exit();
         }
@@ -416,20 +416,23 @@ public final class NativeContext {
     ///
     /// @param fileName     the zip file name (relative to the extension folder)
     /// @param wasiFeatures WASI feature strings; pass null or empty for none
-    /// @return true on success
-    public boolean loadExtension(String fileName, @Nullable List<String> wasiFeatures) {
+    /// @throws NativeException if the native call fails
+    public void loadExtension(String fileName, @Nullable List<String> wasiFeatures) {
         enter();
         try (var arena = Arena.ofConfined()) {
             var nameSeg = arena.allocateFrom(fileName);
             var jsonStr = toJsonArray(wasiFeatures);
             var jsonSeg = jsonStr != null ? arena.allocateFrom(jsonStr) : MemorySegment.NULL;
             int rc = (int) LOAD_EXTENSION.invokeExact(this.address, nameSeg, jsonSeg);
-            return rc == 0;
-        } catch (FatalNativeException e) {
+            if (rc != 0) {
+                var errors = drainErrors();
+                throw new NativeException("Failed to load extension '" + fileName + "'", errors.toArray(new String[0]));
+            }
+        } catch (NativeException e) {
             throw e;
         } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to load extension '{}'", fileName, t);
-            return false;
+            var errors = drainErrors();
+            throw new NativeException("Failed to load extension '" + fileName + "'", errors.toArray(new String[0]));
         } finally {
             exit();
         }
@@ -437,18 +440,21 @@ public final class NativeContext {
 
     /// Initializes a specific loaded extension by its manifest id.
     ///
-    /// @return true on success
-    public boolean initializeExtension(String id) {
+    /// @throws NativeException if the native call fails
+    public void initializeExtension(String id) {
         enter();
         try (var arena = Arena.ofConfined()) {
             var idSeg = arena.allocateFrom(id);
             int rc = (int) INITIALIZE_EXTENSION.invokeExact(this.address, idSeg);
-            return rc == 0;
-        } catch (FatalNativeException e) {
+            if (rc != 0) {
+                var errors = drainErrors();
+                throw new NativeException("Failed to initialize extension '" + id + "'", errors.toArray(new String[0]));
+            }
+        } catch (NativeException e) {
             throw e;
         } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to initialize extension '{}'", id, t);
-            return false;
+            var errors = drainErrors();
+            throw new NativeException("Failed to initialize extension '" + id + "'", errors.toArray(new String[0]));
         } finally {
             exit();
         }
@@ -456,17 +462,20 @@ public final class NativeContext {
 
     /// Initializes all loaded extensions.
     ///
-    /// @return true on success
-    public boolean initializeExtensions() {
+    /// @throws NativeException if the native call fails
+    public void initializeExtensions() {
         enter();
         try {
             int rc = (int) INITIALIZE_EXTENSIONS.invokeExact(this.address);
-            return rc == 0;
-        } catch (FatalNativeException e) {
+            if (rc != 0) {
+                var errors = drainErrors();
+                throw new NativeException("Failed to initialize extensions", errors.toArray(new String[0]));
+            }
+        } catch (NativeException e) {
             throw e;
         } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to initialize extensions", t);
-            return false;
+            var errors = drainErrors();
+            throw new NativeException("Failed to initialize extensions", errors.toArray(new String[0]));
         } finally {
             exit();
         }
@@ -474,36 +483,42 @@ public final class NativeContext {
 
     /// Disables an extension: runs its close function and removes its hooks.
     /// The extension remains loaded but inactive.
-    /// @return true on success
-    public boolean disableExtension(String id) {
+    /// @throws NativeException if the native call fails
+    public void disableExtension(String id) {
         enter();
         try (var arena = Arena.ofConfined()) {
             var idSeg = arena.allocateFrom(id);
             int rc = (int) DISABLE_EXTENSION.invokeExact(this.address, idSeg);
-            return rc == 0;
-        } catch (FatalNativeException e) {
+            if (rc != 0) {
+                var errors = drainErrors();
+                throw new NativeException("Failed to disable extension '" + id + "'", errors.toArray(new String[0]));
+            }
+        } catch (NativeException e) {
             throw e;
         } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to disable extension '{}'", id, t);
-            return false;
+            var errors = drainErrors();
+            throw new NativeException("Failed to disable extension '" + id + "'", errors.toArray(new String[0]));
         } finally {
             exit();
         }
     }
 
     /// Unloads an extension: disables it and removes it from memory.
-    /// @return true on success
-    public boolean unloadExtension(String id) {
+    /// @throws NativeException if the native call fails
+    public void unloadExtension(String id) {
         enter();
         try (var arena = Arena.ofConfined()) {
             var idSeg = arena.allocateFrom(id);
             int rc = (int) UNLOAD_EXTENSION.invokeExact(this.address, idSeg);
-            return rc == 0;
-        } catch (FatalNativeException e) {
+            if (rc != 0) {
+                var errors = drainErrors();
+                throw new NativeException("Failed to unload extension '" + id + "'", errors.toArray(new String[0]));
+            }
+        } catch (NativeException e) {
             throw e;
         } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to unload extension '{}'", id, t);
-            return false;
+            var errors = drainErrors();
+            throw new NativeException("Failed to unload extension '" + id + "'", errors.toArray(new String[0]));
         } finally {
             exit();
         }
@@ -511,19 +526,22 @@ public final class NativeContext {
 
     /// Sets the enabled Vulkan feature names on the native side, as a JSON array.
     /// This populates the sets queried by WASM extensions via check_vulkan_feature().
-    /// @return true on success
-    public boolean setEnabledVulkanFeatures(@Nullable List<String> features) {
+    /// @throws NativeException if the native call fails
+    public void setEnabledVulkanFeatures(@Nullable List<String> features) {
         enter();
         try (var arena = Arena.ofConfined()) {
             var jsonStr = toJsonArray(features);
             var jsonSeg = jsonStr != null ? arena.allocateFrom(jsonStr) : MemorySegment.NULL;
             int rc = (int) SET_ENABLED_VULKAN_FEATURES.invokeExact(this.address, jsonSeg);
-            return rc == 0;
-        } catch (FatalNativeException e) {
+            if (rc != 0) {
+                var errors = drainErrors();
+                throw new NativeException("Failed to set enabled vulkan features", errors.toArray(new String[0]));
+            }
+        } catch (NativeException e) {
             throw e;
         } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to set enabled vulkan features", t);
-            return false;
+            var errors = drainErrors();
+            throw new NativeException("Failed to set enabled vulkan features", errors.toArray(new String[0]));
         } finally {
             exit();
         }
@@ -531,19 +549,22 @@ public final class NativeContext {
 
     /// Sets the enabled Vulkan extension names on the native side, as a JSON array.
     /// This populates the sets queried by WASM extensions via check_vulkan_extension().
-    /// @return true on success
-    public boolean setEnabledVulkanExtensions(@Nullable List<String> extensions) {
+    /// @throws NativeException if the native call fails
+    public void setEnabledVulkanExtensions(@Nullable List<String> extensions) {
         enter();
         try (var arena = Arena.ofConfined()) {
             var jsonStr = toJsonArray(extensions);
             var jsonSeg = jsonStr != null ? arena.allocateFrom(jsonStr) : MemorySegment.NULL;
             int rc = (int) SET_ENABLED_VULKAN_EXTENSIONS.invokeExact(this.address, jsonSeg);
-            return rc == 0;
-        } catch (FatalNativeException e) {
+            if (rc != 0) {
+                var errors = drainErrors();
+                throw new NativeException("Failed to set enabled vulkan extensions", errors.toArray(new String[0]));
+            }
+        } catch (NativeException e) {
             throw e;
         } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to set enabled vulkan extensions", t);
-            return false;
+            var errors = drainErrors();
+            throw new NativeException("Failed to set enabled vulkan extensions", errors.toArray(new String[0]));
         } finally {
             exit();
         }

@@ -43,3 +43,6 @@ replay_*.log
 # Added by cargo
 
 /target
+
+# Testing
+crates/ark-runtime/target/

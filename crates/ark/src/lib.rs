@@ -2,12 +2,10 @@ use ark_runtime::{LaunchArgs, VkBackend, WasmRuntime};
 
 use std::ffi::{CStr, CString};
 
-use anyhow::anyhow;
 use mimalloc::MiMalloc;
 use parking_lot::Mutex;
 use vulkanalia::{
-    loader::{LibloadingLoader, LIBRARY},
-    vk, Entry,
+    loader::{LIBRARY, LibloadingLoader, Loader}, vk
 };
 use vulkanalia_vma::vma::VmaAllocator;
 
@@ -99,7 +97,6 @@ macro_rules! ffi_catch {
 }
 
 pub struct NativeContext {
-    pub vulkan_backend: VkBackend,
     pub wasm_runtime: WasmRuntime,
     pub errors: Mutex<Vec<anyhow::Error>>,
 }
@@ -121,11 +118,23 @@ impl NativeContext {
         extension_folder: String,
     ) -> anyhow::Result<Self> {
         let loader = unsafe { LibloadingLoader::new(LIBRARY)? };
-        let entry = unsafe { Entry::new(loader).map_err(|b| anyhow!("{}", b))? };
+        let get_instance_proc_addr: vk::PFN_vkGetInstanceProcAddr = unsafe {
+            std::mem::transmute(
+                loader.load(b"vkGetInstanceProcAddr\0")
+                    .expect("vkGetInstanceProcAddr not found")
+            )
+        };
+        let get_device_proc_addr: vk::PFN_vkGetDeviceProcAddr = unsafe {
+            std::mem::transmute(get_instance_proc_addr(instance, c"vkGetDeviceProcAddr".as_ptr()))
+        };
+        let device_commands = unsafe {
+            vk::DeviceCommands::load(|name| get_device_proc_addr(device, name))
+        };
+
         let vulkan_backend = VkBackend {
-            entry,
             instance,
             device,
+            device_commands,
             vma,
             transfer_queue,
             graphics_queue,
@@ -136,7 +145,6 @@ impl NativeContext {
         };
         Ok(Self {
             wasm_runtime: WasmRuntime::new(extension_folder, vulkan_backend.clone())?,
-            vulkan_backend,
             errors: Mutex::new(Vec::new()),
         })
     }

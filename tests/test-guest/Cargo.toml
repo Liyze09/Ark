@@ -1,0 +1,11 @@
+[package]
+name = "test-guest"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+ark-extension-api = { path = "../../crates/ark-extension-api" }

@@ -4,7 +4,6 @@ interface queue {
     use core.{vulkan-error};
     use command-buffer.{command-buffer};
     use sync.{semaphore, fence};
-    use wasi:clocks/monotonic-clock@0.2.11.{duration};
 
     /// Describes a semaphore to wait on before queue submission proceeds,
     /// and which pipeline stage(s) must wait.
@@ -68,7 +67,7 @@ interface queue {
     /// the associated submission.
     resource fence-future {
         /// Block until the fence is signaled, with a timeout.
-        wait: func(duration: duration) -> result<_, vulkan-error>;
+        wait: func(duration: u64) -> result<_, vulkan-error>;
 
         /// Non-blocking check if the fence is signaled.
         try-wait: func() -> result<bool, vulkan-error>;

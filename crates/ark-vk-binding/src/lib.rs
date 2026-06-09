@@ -1,12 +1,11 @@
 use std::{borrow::Cow, collections::HashMap, sync::{Mutex, OnceLock}};
-use vulkanalia::{Entry, vk};
+use vulkanalia::vk;
 use vulkanalia_vma::vma::VmaAllocator;
 use wasmtime::component::{HasData, ResourceTable};
 
-mod binding;
+pub mod binding;
 
 pub struct VkContextOwned {
-    pub entry: Entry,
     pub instance: vk::Instance,
     pub device: vk::Device,
     pub device_commands: vk::DeviceCommands,
@@ -14,11 +13,8 @@ pub struct VkContextOwned {
     pub graphics_queue: vk::Queue,
     pub compute_queue: vk::Queue,
     pub transfer_queue: vk::Queue,
-    /// Queue family index for the graphics queue (provided by the host).
     pub graphics_queue_family_index: u32,
-    /// Queue family index for the compute queue (provided by the host).
     pub compute_queue_family_index: u32,
-    /// Queue family index for the transfer queue (provided by the host).
     pub transfer_queue_family_index: u32,
     pub graphics_command_pool: OnceLock<vk::CommandPool>,
     pub compute_command_pool: OnceLock<vk::CommandPool>,
@@ -43,7 +39,6 @@ impl VkContextOwned {
     /// `vkGetDeviceProcAddr`.
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn new(
-        entry: Entry,
         instance: vk::Instance,
         device: vk::Device,
         device_commands: vk::DeviceCommands,
@@ -56,7 +51,6 @@ impl VkContextOwned {
         transfer_queue_family_index: u32,
     ) -> Self {
         Self {
-            entry,
             instance,
             device,
             device_commands,

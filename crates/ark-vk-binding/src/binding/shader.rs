@@ -19,7 +19,13 @@ pub(crate) struct GpuShaderModule {
 
 impl Host for VkContextView<'_> {
     fn shader_from_bytes(&mut self, code: Vec<u32>) -> Result<Resource<ShaderModule>, VulkanError> {
-        let info = vk::ShaderModuleCreateInfo::builder().code(&code);
+        let info = vk::ShaderModuleCreateInfo {
+            s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
+            next: std::ptr::null(),
+            flags: vk::ShaderModuleCreateFlags::empty(),
+            code_size: code.len() * 4,
+            code: code.as_ptr(),
+        };
         let module =
             unsafe { self.vk_device().create_shader_module(&info, None) }.map_err(vk_err)?;
         let handle = self
@@ -44,7 +50,13 @@ impl Host for VkContextView<'_> {
             .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
             .collect();
 
-        let info = vk::ShaderModuleCreateInfo::builder().code(&code);
+        let info = vk::ShaderModuleCreateInfo {
+            s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
+            next: std::ptr::null(),
+            flags: vk::ShaderModuleCreateFlags::empty(),
+            code_size: code.len() * 4,
+            code: code.as_ptr(),
+        };
         let module =
             unsafe { self.vk_device().create_shader_module(&info, None) }.map_err(vk_err)?;
         let handle = self

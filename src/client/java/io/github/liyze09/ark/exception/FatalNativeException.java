@@ -6,7 +6,7 @@ package io.github.liyze09.ark.exception;
  * with this exception, and the first call that returns after the fatal event
  * automatically releases the native resources.
  */
-public class FatalNativeException extends RuntimeException {
+public class FatalNativeException extends NativeException {
     public FatalNativeException(String message) {
         super(message);
     }

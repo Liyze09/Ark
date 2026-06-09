@@ -8,7 +8,7 @@ use crate::{
 
 impl VkContextView<'_> {
     #[inline]
-    pub fn vma(&self) -> &vulkanalia_vma::Allocator {
+    pub const fn vma(&self) -> &vulkanalia_vma::Allocator {
         unsafe {
             &*(&self.owned.vma as *const vulkanalia_vma::vma::VmaAllocator
                 as *const vulkanalia_vma::Allocator)

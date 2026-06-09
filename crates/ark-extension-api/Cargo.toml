@@ -1,0 +1,13 @@
+[package]
+name = "ark-extension-api"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["lib"]
+path = "src/lib.rs"
+
+[dependencies]
+wit-bindgen = { version = "0.57.1", features = ["std", "macros", "realloc", "bitflags", "macro-string"], default-features = false }
+bitflags = "2.13.0"
+log = { workspace = true }

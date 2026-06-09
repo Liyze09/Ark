@@ -2,7 +2,6 @@ package ark:gpu@0.1.0;
 
 interface sync {
     use core.{vulkan-error, queue-family};
-    use wasi:clocks/monotonic-clock@0.2.11.{duration};
 
     // ── Sharing ──
 
@@ -24,7 +23,7 @@ interface sync {
     create-fence: func(signaled: bool) -> result<fence, vulkan-error>;
 
     /// Wait for a fence to become signaled, with a timeout.
-    wait-for-fence: func(fence: borrow<fence>, timeout: duration) -> result<_, vulkan-error>;
+    wait-for-fence: func(fence: borrow<fence>, timeout: u64) -> result<_, vulkan-error>;
 
     /// Non-blocking check if a fence is signaled.
     fence-is-signaled: func(fence: borrow<fence>) -> result<bool, vulkan-error>;

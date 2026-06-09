@@ -2,6 +2,7 @@ package io.github.liyze09.ark;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vulkan.VulkanDevice;
+import io.github.liyze09.ark.exception.FatalNativeException;
 import io.github.liyze09.ark.extension.ExtensionLoader;
 import io.github.liyze09.ark.mixin.GpuDeviceAccessor;
 import net.fabricmc.api.ClientModInitializer;
@@ -29,7 +30,7 @@ public class Ark implements ClientModInitializer {
         var device = RenderSystem.getDevice();
         if (!device.getDeviceInfo().backendName().equalsIgnoreCase("Vulkan")) {
             LOGGER.error("Fatal error: Ark only support Vulkan Minecraft");
-            throw new IllegalStateException("Ark only support Vulkan Minecraft");
+            throw new FatalNativeException("Ark only support Vulkan Minecraft");
         }
         LOGGER.info("Ark running on {}", device.getDeviceInfo().name());
         var backend = (VulkanDevice) ((GpuDeviceAccessor) device).getGpuDeviceBackend();
@@ -45,10 +46,6 @@ public class Ark implements ClientModInitializer {
                 graphicsQueue, computeQueue, transferQueue,
                 ExtensionLoader.extensionPath
         );
-        if (nativeContext == null) {
-            LOGGER.error("Failed to create native context — Ark will not function");
-            return;
-        }
 
         nativeContext.setEnabledVulkanExtensions(getExtensionLoader().getCurrentlyEnabledExtensions());
         nativeContext.setEnabledVulkanFeatures(getExtensionLoader().getCurrentlyEnabledFeatures());
