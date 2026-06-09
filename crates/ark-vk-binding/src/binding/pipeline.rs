@@ -7,9 +7,10 @@ use crate::{
         ark::gpu::{
             core::VulkanError,
             pipeline::{
-                ComputePipeline, DescriptorSetInfo, GraphicsPipeline, Host, HostComputePipeline,
-                HostGraphicsPipeline, HostPipelineLayout, HostRayTracingPipeline, PipelineLayout,
-                RayTracingPipeline,
+                ComputePipeline, DescriptorSetInfo, GraphicsPipeline,
+                GraphicsPipelineCreateInfo, Host, HostComputePipeline, HostGraphicsPipeline,
+                HostPipelineLayout, HostRayTracingPipeline, PipelineLayout,
+                PrimitiveTopology, RayTracingPipeline,
             },
             shader::{PushConstantRange, ShaderModule},
         },
@@ -129,6 +130,157 @@ impl Host for VkContextView<'_> {
         let handle = self
             .table
             .push(GpuComputePipeline { pipeline })
+            .map_err(|_| VulkanError::OutOfHostMemory)?;
+        Ok(Resource::new_own(handle.rep()))
+    }
+
+    fn create_graphics_pipeline(
+        &mut self,
+        info: GraphicsPipelineCreateInfo,
+    ) -> Result<Resource<GraphicsPipeline>, VulkanError> {
+        let layout_key = Resource::<GpuPipelineLayout>::new_borrow(info.layout.rep());
+        let gpu_layout = self.table.get(&layout_key).map_err(|_| VulkanError::Unknown)?;
+
+        let vs_key = Resource::<super::shader::GpuShaderModule>::new_borrow(info.vertex_shader.rep());
+        let vs = self.table.get(&vs_key).map_err(|_| VulkanError::Unknown)?;
+        let fs_key = Resource::<super::shader::GpuShaderModule>::new_borrow(info.fragment_shader.rep());
+        let fs = self.table.get(&fs_key).map_err(|_| VulkanError::Unknown)?;
+
+        let vs_entry = std::ffi::CString::new(info.vertex_entry)
+            .map_err(|_| VulkanError::Unnamed("vertex entry point name contains null byte".into()))?;
+        let fs_entry = std::ffi::CString::new(info.fragment_entry)
+            .map_err(|_| VulkanError::Unnamed("fragment entry point name contains null byte".into()))?;
+
+        let stages = [
+            vk::PipelineShaderStageCreateInfo {
+                s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+                next: std::ptr::null(),
+                flags: vk::PipelineShaderStageCreateFlags::empty(),
+                stage: vk::ShaderStageFlags::VERTEX,
+                module: vs.module,
+                name: vs_entry.as_ptr(),
+                specialization_info: std::ptr::null(),
+            },
+            vk::PipelineShaderStageCreateInfo {
+                s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+                next: std::ptr::null(),
+                flags: vk::PipelineShaderStageCreateFlags::empty(),
+                stage: vk::ShaderStageFlags::FRAGMENT,
+                module: fs.module,
+                name: fs_entry.as_ptr(),
+                specialization_info: std::ptr::null(),
+            },
+        ];
+
+        // Vertex input
+        let vk_attrs: Vec<vk::VertexInputAttributeDescription> = info
+            .vertex_attributes
+            .iter()
+            .map(|a| vk::VertexInputAttributeDescription {
+                location: a.location,
+                binding: a.binding,
+                format: vk::Format::from_raw(a.format as i32),
+                offset: a.offset,
+            })
+            .collect();
+
+        let vk_bindings: Vec<vk::VertexInputBindingDescription> = {
+            let mut bindings: Vec<u32> = info.vertex_attributes.iter().map(|a| a.binding).collect();
+            bindings.sort();
+            bindings.dedup();
+            bindings
+                .into_iter()
+                .map(|b| vk::VertexInputBindingDescription {
+                    binding: b,
+                    stride: 0, // caller must set via dynamic state if needed
+                    input_rate: vk::VertexInputRate::VERTEX,
+                })
+                .collect()
+        };
+
+        let vertex_input = vk::PipelineVertexInputStateCreateInfo::builder()
+            .vertex_binding_descriptions(&vk_bindings)
+            .vertex_attribute_descriptions(&vk_attrs);
+
+        // Topology
+        let topology = match info.topology {
+            PrimitiveTopology::PointList => vk::PrimitiveTopology::POINT_LIST,
+            PrimitiveTopology::LineList => vk::PrimitiveTopology::LINE_LIST,
+            PrimitiveTopology::LineStrip => vk::PrimitiveTopology::LINE_STRIP,
+            PrimitiveTopology::TriangleList => vk::PrimitiveTopology::TRIANGLE_LIST,
+            PrimitiveTopology::TriangleStrip => vk::PrimitiveTopology::TRIANGLE_STRIP,
+            PrimitiveTopology::TriangleFan => vk::PrimitiveTopology::TRIANGLE_FAN,
+        };
+
+        let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::builder()
+            .topology(topology);
+
+        let viewport_state = vk::PipelineViewportStateCreateInfo::builder()
+            .viewport_count(1)
+            .scissor_count(1);
+
+        // Sensible defaults
+        let rasterization = vk::PipelineRasterizationStateCreateInfo::builder()
+            .polygon_mode(vk::PolygonMode::FILL)
+            .line_width(1.0)
+            .cull_mode(vk::CullModeFlags::NONE)
+            .front_face(vk::FrontFace::CLOCKWISE);
+
+        let multisample = vk::PipelineMultisampleStateCreateInfo::builder()
+            .rasterization_samples(vk::SampleCountFlags::_1);
+
+        let color_blend_attachment = vk::PipelineColorBlendAttachmentState::builder()
+            .color_write_mask(
+                vk::ColorComponentFlags::R
+                    | vk::ColorComponentFlags::G
+                    | vk::ColorComponentFlags::B
+                    | vk::ColorComponentFlags::A,
+            );
+        let color_blend = vk::PipelineColorBlendStateCreateInfo::builder()
+            .attachments(std::slice::from_ref(&color_blend_attachment));
+
+        let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+        let dynamic_state = vk::PipelineDynamicStateCreateInfo::builder()
+            .dynamic_states(&dynamic_states);
+
+        let mut rendering_info = vk::PipelineRenderingCreateInfo::builder()
+            .color_attachment_formats(&[vk::Format::from_raw(info.color_format as i32)])
+            .build();
+
+        let pipeline_info = vk::GraphicsPipelineCreateInfo::builder()
+            .stages(&stages)
+            .vertex_input_state(&vertex_input)
+            .input_assembly_state(&input_assembly)
+            .viewport_state(&viewport_state)
+            .rasterization_state(&rasterization)
+            .multisample_state(&multisample)
+            .color_blend_state(&color_blend)
+            .dynamic_state(&dynamic_state)
+            .layout(gpu_layout.layout);
+
+        let pipeline_info = if info.dynamic_rendering {
+            pipeline_info.push_next(&mut rendering_info)
+        } else {
+            pipeline_info
+        };
+
+        let (pipelines, _) = unsafe {
+            self.vk_device().create_graphics_pipelines(
+                vk::PipelineCache::default(),
+                &[pipeline_info.build()],
+                None,
+            )
+        }
+        .map_err(vk_err)?;
+
+        let pipeline = pipelines
+            .into_iter()
+            .next()
+            .ok_or_else(|| VulkanError::Unnamed("driver returned zero pipelines".into()))?;
+
+        let handle = self
+            .table
+            .push(GpuGraphicsPipeline { pipeline })
             .map_err(|_| VulkanError::OutOfHostMemory)?;
         Ok(Resource::new_own(handle.rep()))
     }

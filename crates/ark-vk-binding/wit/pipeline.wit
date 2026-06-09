@@ -48,6 +48,58 @@ interface pipeline {
     /// A compiled graphics pipeline, ready for drawing.
     resource graphics-pipeline { }
 
+    /// Primitive topology for the input assembly stage.
+    enum primitive-topology {
+        point-list,
+        line-list,
+        line-strip,
+        triangle-list,
+        triangle-strip,
+        triangle-fan,
+    }
+
+    /// Describes a single vertex input attribute.
+    record vertex-attribute {
+        /// Shader location number.
+        location: u32,
+        /// Vertex buffer binding index.
+        binding: u32,
+        /// VkFormat value (e.g. `VK_FORMAT_R32G32_SFLOAT = 103`).
+        format: u32,
+        /// Byte offset from the start of the vertex.
+        offset: u32,
+    }
+
+    /// Parameters for creating a graphics pipeline.
+    record graphics-pipeline-create-info {
+        /// Pipeline layout describing descriptor set and push constant layout.
+        layout: borrow<pipeline-layout>,
+        /// Vertex shader module (SPIR‑V).
+        vertex-shader: borrow<shader-module>,
+        /// Vertex shader entry point name (e.g. `"main"`).
+        vertex-entry: string,
+        /// Fragment shader module (SPIR‑V).
+        fragment-shader: borrow<shader-module>,
+        /// Fragment shader entry point name.
+        fragment-entry: string,
+        /// Vertex input attributes – pass an empty list when using
+        /// `gl_VertexIndex` / `gl_InstanceIndex` without vertex buffers.
+        vertex-attributes: list<vertex-attribute>,
+        /// Primitive topology (triangle list, line strip, …).
+        topology: primitive-topology,
+        /// Colour attachment format (`VkFormat`).
+        color-format: u32,
+        /// Enable `VK_KHR_dynamic_rendering` (begin/end rendering).
+        dynamic-rendering: bool,
+    }
+
+    /// Create a graphics pipeline.
+    ///
+    /// Uses reasonable defaults for rasterisation (fill, no cull),
+    /// multisampling (1×), colour blending (write all channels, no
+    /// blend), and dynamic state (viewport + scissor).
+    create-graphics-pipeline: func(info: graphics-pipeline-create-info) -> result<graphics-pipeline, vulkan-error>;
+
     /// A ray-tracing pipeline, for ray generation, miss, hit, and callable shaders.
     resource ray-tracing-pipeline { }
 }
