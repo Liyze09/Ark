@@ -3,20 +3,19 @@ use vulkanalia::vk::{self, HasBuilder};
 use wasmtime::component::Resource;
 
 use crate::{
+    VkContextView,
     binding::{
         ark::gpu::{
             core::VulkanError,
             pipeline::{
-                ComputePipeline, DescriptorSetInfo, GraphicsPipeline,
-                GraphicsPipelineCreateInfo, Host, HostComputePipeline, HostGraphicsPipeline,
-                HostPipelineLayout, HostRayTracingPipeline, PipelineLayout,
-                PrimitiveTopology, RayTracingPipeline,
+                ComputePipeline, DescriptorSetInfo, GraphicsPipeline, GraphicsPipelineCreateInfo,
+                Host, HostComputePipeline, HostGraphicsPipeline, HostPipelineLayout,
+                HostRayTracingPipeline, PipelineLayout, PrimitiveTopology, RayTracingPipeline,
             },
             shader::{PushConstantRange, ShaderModule},
         },
         vk_err,
     },
-    VkContextView,
 };
 
 pub(crate) struct GpuPipelineLayout {
@@ -56,8 +55,9 @@ impl Host for VkContextView<'_> {
         let mut set_layouts: Vec<vk::DescriptorSetLayout> = Vec::new();
 
         for ds_info in &descriptor_sets {
-            let layout_key =
-                Resource::<super::descriptor::GpuDescriptorSetLayout>::new_borrow(ds_info.layout.rep());
+            let layout_key = Resource::<super::descriptor::GpuDescriptorSetLayout>::new_borrow(
+                ds_info.layout.rep(),
+            );
             let gpu_dsl = self
                 .table
                 .get(&layout_key)
@@ -139,17 +139,24 @@ impl Host for VkContextView<'_> {
         info: GraphicsPipelineCreateInfo,
     ) -> Result<Resource<GraphicsPipeline>, VulkanError> {
         let layout_key = Resource::<GpuPipelineLayout>::new_borrow(info.layout.rep());
-        let gpu_layout = self.table.get(&layout_key).map_err(|_| VulkanError::Unknown)?;
+        let gpu_layout = self
+            .table
+            .get(&layout_key)
+            .map_err(|_| VulkanError::Unknown)?;
 
-        let vs_key = Resource::<super::shader::GpuShaderModule>::new_borrow(info.vertex_shader.rep());
+        let vs_key =
+            Resource::<super::shader::GpuShaderModule>::new_borrow(info.vertex_shader.rep());
         let vs = self.table.get(&vs_key).map_err(|_| VulkanError::Unknown)?;
-        let fs_key = Resource::<super::shader::GpuShaderModule>::new_borrow(info.fragment_shader.rep());
+        let fs_key =
+            Resource::<super::shader::GpuShaderModule>::new_borrow(info.fragment_shader.rep());
         let fs = self.table.get(&fs_key).map_err(|_| VulkanError::Unknown)?;
 
-        let vs_entry = std::ffi::CString::new(info.vertex_entry)
-            .map_err(|_| VulkanError::Unnamed("vertex entry point name contains null byte".into()))?;
-        let fs_entry = std::ffi::CString::new(info.fragment_entry)
-            .map_err(|_| VulkanError::Unnamed("fragment entry point name contains null byte".into()))?;
+        let vs_entry = std::ffi::CString::new(info.vertex_entry).map_err(|_| {
+            VulkanError::Unnamed("vertex entry point name contains null byte".into())
+        })?;
+        let fs_entry = std::ffi::CString::new(info.fragment_entry).map_err(|_| {
+            VulkanError::Unnamed("fragment entry point name contains null byte".into())
+        })?;
 
         let stages = [
             vk::PipelineShaderStageCreateInfo {
@@ -212,8 +219,7 @@ impl Host for VkContextView<'_> {
             PrimitiveTopology::TriangleFan => vk::PrimitiveTopology::TRIANGLE_FAN,
         };
 
-        let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::builder()
-            .topology(topology);
+        let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::builder().topology(topology);
 
         let viewport_state = vk::PipelineViewportStateCreateInfo::builder()
             .viewport_count(1)
@@ -240,8 +246,8 @@ impl Host for VkContextView<'_> {
             .attachments(std::slice::from_ref(&color_blend_attachment));
 
         let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-        let dynamic_state = vk::PipelineDynamicStateCreateInfo::builder()
-            .dynamic_states(&dynamic_states);
+        let dynamic_state =
+            vk::PipelineDynamicStateCreateInfo::builder().dynamic_states(&dynamic_states);
 
         let mut rendering_info = vk::PipelineRenderingCreateInfo::builder()
             .color_attachment_formats(&[vk::Format::from_raw(info.color_format as i32)])

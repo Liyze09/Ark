@@ -2,8 +2,8 @@ use vulkanalia::vk;
 use vulkanalia_vma::{AllocationCreateFlags, AllocationOptions, MemoryUsage};
 
 use crate::{
-    binding::ark::gpu::memory::{AllocateInfo, MemoryType},
     VkContextView,
+    binding::ark::gpu::memory::{AllocateInfo, MemoryType},
 };
 
 impl VkContextView<'_> {

@@ -3,26 +3,24 @@ use vulkanalia::vk::{self, DeviceV1_3, HasBuilder};
 use wasmtime::component::Resource;
 
 use crate::{
-    binding::
-        ark::gpu::{
-            buffer::Buffer as WitBuffer,
-            command_buffer::{
-                BufferCopy, BufferImageCopy, ClearColor, ClearDepthStencil,
-                CommandBuffer, CommandBufferBuilder, CommandBufferUsage, Extent3d, Filter, Host,
-                HostCommandBuffer, HostCommandBufferBuilder, ImageAspectFlags, ImageBlit, ImageCopy, ImageResolve, ImageSubresourceLayers, ImageSubresourceRange,
-                MemoryBarrier, Offset3d, Rect2d, RenderingColorAttachment,
-                RenderingDepthStencilAttachment, Viewport,
-            },
-            core::{QueueFamily, VulkanError},
-            descriptor::DescriptorSet as WitDescriptorSet,
-            image::{Image as WitImage, ImageView as WitImageView},
-            pipeline::{
-                ComputePipeline, GraphicsPipeline, PipelineBindPoint, PipelineLayout,
-                RayTracingPipeline,
-            },
-        }
-    ,
     VkContextView,
+    binding::ark::gpu::{
+        buffer::Buffer as WitBuffer,
+        command_buffer::{
+            BufferCopy, BufferImageCopy, ClearColor, ClearDepthStencil, CommandBuffer,
+            CommandBufferBuilder, CommandBufferUsage, Extent3d, Filter, Host, HostCommandBuffer,
+            HostCommandBufferBuilder, ImageAspectFlags, ImageBlit, ImageCopy, ImageResolve,
+            ImageSubresourceLayers, ImageSubresourceRange, MemoryBarrier, Offset3d, Rect2d,
+            RenderingColorAttachment, RenderingDepthStencilAttachment, Viewport,
+        },
+        core::{QueueFamily, VulkanError},
+        descriptor::DescriptorSet as WitDescriptorSet,
+        image::{Image as WitImage, ImageView as WitImageView},
+        pipeline::{
+            ComputePipeline, GraphicsPipeline, PipelineBindPoint, PipelineLayout,
+            RayTracingPipeline,
+        },
+    },
 };
 
 impl VkContextView<'_> {
@@ -343,12 +341,8 @@ impl HostCommandBufferBuilder for VkContextView<'_> {
         let mut vk_sets: Vec<vk::DescriptorSet> = Vec::with_capacity(sets.len());
         let mut set_keys: Vec<Resource<WitDescriptorSet>> = Vec::with_capacity(sets.len());
         for set in &sets {
-            let set_key =
-                Resource::<super::descriptor::GpuDescriptorSet>::new_borrow(set.rep());
-            let gpu_set = self
-                .table
-                .get(&set_key)
-                .map_err(|_| VulkanError::Unknown)?;
+            let set_key = Resource::<super::descriptor::GpuDescriptorSet>::new_borrow(set.rep());
+            let gpu_set = self.table.get(&set_key).map_err(|_| VulkanError::Unknown)?;
             vk_sets.push(gpu_set.set);
             set_keys.push(Resource::<WitDescriptorSet>::new_borrow(set.rep()));
         }
@@ -905,8 +899,12 @@ impl HostCommandBufferBuilder for VkContextView<'_> {
             if barrier.global && barrier.buffer.is_none() && barrier.image.is_none() {
                 global_barriers.push(
                     vk::MemoryBarrier::builder()
-                        .src_access_mask(vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE)
-                        .dst_access_mask(vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE)
+                        .src_access_mask(
+                            vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE,
+                        )
+                        .dst_access_mask(
+                            vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE,
+                        )
                         .build(),
                 );
             }
@@ -920,9 +918,7 @@ impl HostCommandBufferBuilder for VkContextView<'_> {
             dst_stage |= vk::PipelineStageFlags::from_bits_truncate(barrier.dst_stage);
         }
 
-        if !buffer_barriers.is_empty()
-            || !image_barriers.is_empty()
-            || !global_barriers.is_empty()
+        if !buffer_barriers.is_empty() || !image_barriers.is_empty() || !global_barriers.is_empty()
         {
             unsafe {
                 self.vk_device().cmd_pipeline_barrier(

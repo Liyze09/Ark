@@ -40,14 +40,20 @@ pub enum ExtensionError {
     Runtime(#[from] anyhow::Error),
     /// Multiple extensions failed during batch initialization.
     #[error("{count} error(s) occurred: {errors:?}")]
-    Multi { count: usize, errors: Vec<ExtensionError> },
+    Multi {
+        count: usize,
+        errors: Vec<ExtensionError>,
+    },
 }
 
 impl ExtensionError {
     /// Wrap a [`wasmtime::Error`], distinguishing WASM traps from host errors.
     fn from_wasmtime(err: wasmtime::Error, ext_id: &str) -> Self {
         if err.downcast_ref::<Trap>().is_some() {
-            Self::WasmTrap { id: ext_id.to_string(), source: err }
+            Self::WasmTrap {
+                id: ext_id.to_string(),
+                source: err,
+            }
         } else {
             Self::Runtime(err.into())
         }
@@ -154,14 +160,16 @@ impl WasmRuntime {
         self.load_extension_by_bytes(&bytes, args)
     }
 
-    pub fn load_extension_by_bytes(&self, bytes: &[u8], args: LaunchArgs) -> Result<(), ExtensionError> {
+    pub fn load_extension_by_bytes(
+        &self,
+        bytes: &[u8],
+        args: LaunchArgs,
+    ) -> Result<(), ExtensionError> {
         let package = parse_package(bytes)?;
         let wasm_bytes = package
             .files
             .get(package.manifest.entrypoint.as_str())
-            .ok_or_else(|| anyhow::anyhow!(
-                "Failed to find entrypoint wasm file in package"
-            ))?;
+            .ok_or_else(|| anyhow::anyhow!("Failed to find entrypoint wasm file in package"))?;
         let wasm_component = Component::from_binary(&self.engine, wasm_bytes)
             .map_err(|e| ExtensionError::from_wasmtime(e, &package.manifest.id))?;
 
@@ -175,12 +183,9 @@ impl WasmRuntime {
                     host_path,
                     guest_path,
                 } => {
-                    wasi_builder.preopened_dir(
-                        &host_path,
-                        &guest_path,
-                        DirPerms::all(),
-                        FilePerms::all(),
-                    ).map_err(|e| ExtensionError::Runtime(e.into()))?;
+                    wasi_builder
+                        .preopened_dir(&host_path, &guest_path, DirPerms::all(), FilePerms::all())
+                        .map_err(|e| ExtensionError::Runtime(e.into()))?;
                 }
                 WasiFeature::Network { addrs } => network_addrs.extend(addrs),
             }
@@ -213,8 +218,7 @@ impl WasmRuntime {
             },
         );
         let ext_id = store.data().package.manifest.id.clone();
-        let mut loaded_extensions = self.loaded_extensions
-            .lock();
+        let mut loaded_extensions = self.loaded_extensions.lock();
         let entry = Entry::instantiate(&mut store, &wasm_component, &self.linker)
             .map_err(|e| ExtensionError::from_wasmtime(e, &ext_id))?;
         loaded_extensions.insert(ext_id, (store, entry));
@@ -222,13 +226,13 @@ impl WasmRuntime {
     }
 
     pub fn initialize_extension(&self, id: &str) -> Result<(), ExtensionError> {
-        let mut loaded = self
-            .loaded_extensions
-            .lock();
+        let mut loaded = self.loaded_extensions.lock();
         let (store, entry) = loaded
             .get_mut(id)
             .ok_or_else(|| anyhow::anyhow!("Extension not found: {id}"))?;
-        entry.ark_core_entrance().call_on_init(store)
+        entry
+            .ark_core_entrance()
+            .call_on_init(store)
             .map_err(|e| ExtensionError::from_wasmtime(e, id))?;
         Ok(())
     }
@@ -236,9 +240,7 @@ impl WasmRuntime {
     pub fn initialize_extensions(&self) -> Result<(), ExtensionError> {
         // Collect IDs first so we do not hold the lock while calling into WASM.
         let ids: Vec<String> = {
-            let loaded = self
-                .loaded_extensions
-                .lock();
+            let loaded = self.loaded_extensions.lock();
             loaded.keys().cloned().collect()
         };
 
@@ -250,14 +252,15 @@ impl WasmRuntime {
         if errors.is_empty() {
             Ok(())
         } else {
-            Err(ExtensionError::Multi { count: errors.len(), errors })
+            Err(ExtensionError::Multi {
+                count: errors.len(),
+                errors,
+            })
         }
     }
 
     pub fn disable_extension(&self, id: &str) -> Result<(), ExtensionError> {
-        let mut loaded = self
-            .loaded_extensions
-            .lock();
+        let mut loaded = self.loaded_extensions.lock();
         let (store, entry) = loaded
             .get_mut(id)
             .ok_or_else(|| anyhow::anyhow!("Extension not found: {id}"))?;
@@ -272,9 +275,7 @@ impl WasmRuntime {
     ) -> Result<(), ExtensionError> {
         // Remove this extension from all trigger registries.
         {
-            let mut registry = self
-                .registry
-                .lock();
+            let mut registry = self.registry.lock();
             registry.iter_mut().for_each(|(_trigger, entries)| {
                 if let Some(pos) = entries.iter().position(|v| v == id) {
                     entries.swap_remove(pos);
@@ -282,15 +283,15 @@ impl WasmRuntime {
             });
         } // registry lock released before calling into WASM
 
-        entry.ark_core_entrance().call_on_destroy(store)
+        entry
+            .ark_core_entrance()
+            .call_on_destroy(store)
             .map_err(|e| ExtensionError::from_wasmtime(e, id))?;
         Ok(())
     }
 
     pub fn unload_extension(&self, id: &str) -> Result<(), ExtensionError> {
-        let mut loaded = self
-            .loaded_extensions
-            .lock();
+        let mut loaded = self.loaded_extensions.lock();
         if let Some((store, instance)) = loaded.get_mut(id) {
             self.disable_inner(store, instance, id)?;
         }
@@ -302,18 +303,16 @@ impl WasmRuntime {
         // Collect IDs under the registry lock, then release before calling into
         // WASM to avoid a lock-ordering deadlock (registry → loaded_extensions → registry).
         let ids: Vec<String> = {
-            let registry = self
-                .registry
-                .lock();
+            let registry = self.registry.lock();
             registry.get(trigger).cloned().unwrap_or_default()
         };
 
         for id in &ids {
-            let mut loaded = self
-                .loaded_extensions
-                .lock();
+            let mut loaded = self.loaded_extensions.lock();
             if let Some((store, instance)) = loaded.get_mut(id) {
-                instance.ark_core_entrance().call_on_callback(store, trigger)
+                instance
+                    .ark_core_entrance()
+                    .call_on_callback(store, trigger)
                     .map_err(|e| ExtensionError::from_wasmtime(e, id))?;
             } else {
                 warn!("Unable to find extension with id: {id} in trigger registry");

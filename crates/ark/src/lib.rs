@@ -5,10 +5,10 @@ use std::ffi::{CStr, CString};
 use mimalloc::MiMalloc;
 use parking_lot::Mutex;
 use vulkanalia::{
-    loader::{LIBRARY, LibloadingLoader, Loader}, vk
+    loader::{LIBRARY, LibloadingLoader, Loader},
+    vk,
 };
 use vulkanalia_vma::vma::VmaAllocator;
-
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -56,7 +56,13 @@ impl log::Log for ArkLogger {
 }
 
 fn init_logger(trace: LogFn, debug: LogFn, info: LogFn, warn: LogFn, error: LogFn) -> bool {
-    let funcs = LoggerFuncs { trace, debug, info, warn, error };
+    let funcs = LoggerFuncs {
+        trace,
+        debug,
+        info,
+        warn,
+        error,
+    };
     if LOGGER_FUNCS.set(funcs).is_err() {
         return false; // already initialized
     }
@@ -120,16 +126,19 @@ impl NativeContext {
         let loader = unsafe { LibloadingLoader::new(LIBRARY)? };
         let get_instance_proc_addr: vk::PFN_vkGetInstanceProcAddr = unsafe {
             std::mem::transmute(
-                loader.load(b"vkGetInstanceProcAddr\0")
-                    .expect("vkGetInstanceProcAddr not found")
+                loader
+                    .load(b"vkGetInstanceProcAddr\0")
+                    .expect("vkGetInstanceProcAddr not found"),
             )
         };
         let get_device_proc_addr: vk::PFN_vkGetDeviceProcAddr = unsafe {
-            std::mem::transmute(get_instance_proc_addr(instance, c"vkGetDeviceProcAddr".as_ptr()))
+            std::mem::transmute(get_instance_proc_addr(
+                instance,
+                c"vkGetDeviceProcAddr".as_ptr(),
+            ))
         };
-        let device_commands = unsafe {
-            vk::DeviceCommands::load(|name| get_device_proc_addr(device, name))
-        };
+        let device_commands =
+            unsafe { vk::DeviceCommands::load(|name| get_device_proc_addr(device, name)) };
 
         let vulkan_backend = VkBackend {
             instance,
@@ -279,14 +288,20 @@ pub unsafe extern "C" fn ark_load_extension(
                 match serde_json::from_str(&json) {
                     Ok(v) => v,
                     Err(e) => {
-                        ctx.push_error(anyhow::anyhow!("Failed to parse wasi_features JSON: {}", e));
+                        ctx.push_error(anyhow::anyhow!(
+                            "Failed to parse wasi_features JSON: {}",
+                            e
+                        ));
                         return 1;
                     }
                 }
             };
             match ctx.wasm_runtime.load_extension(
                 file_name.as_ref(),
-                LaunchArgs { enabled_wasi_features: wasi_features, ..Default::default() },
+                LaunchArgs {
+                    enabled_wasi_features: wasi_features,
+                    ..Default::default()
+                },
             ) {
                 Ok(_) => 0,
                 Err(e) => {
@@ -452,7 +467,9 @@ pub unsafe extern "C" fn ark_set_enabled_vulkan_features(
                 match serde_json::from_str(&json_str) {
                     Ok(v) => v,
                     Err(e) => {
-                        ctx.push_error(anyhow::anyhow!("Failed to parse enabled vulkan features JSON: {e}"));
+                        ctx.push_error(anyhow::anyhow!(
+                            "Failed to parse enabled vulkan features JSON: {e}"
+                        ));
                         return 1;
                     }
                 }
@@ -486,7 +503,9 @@ pub unsafe extern "C" fn ark_set_enabled_vulkan_extensions(
                 match serde_json::from_str(&json_str) {
                     Ok(v) => v,
                     Err(e) => {
-                        ctx.push_error(anyhow::anyhow!("Failed to parse enabled vulkan extensions JSON: {e}"));
+                        ctx.push_error(anyhow::anyhow!(
+                            "Failed to parse enabled vulkan extensions JSON: {e}"
+                        ));
                         return 1;
                     }
                 }

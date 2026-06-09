@@ -1,4 +1,8 @@
-use std::{borrow::Cow, collections::HashMap, sync::{Mutex, OnceLock}};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
 use vulkanalia::vk;
 use vulkanalia_vma::vma::VmaAllocator;
 use wasmtime::component::{HasData, ResourceTable};
@@ -27,7 +31,7 @@ pub struct VkContextOwned {
 pub struct VkContextView<'a> {
     pub owned: &'a VkContextOwned,
     pub table: &'a mut ResourceTable,
-    pub files: &'a HashMap<String, Cow<'static, [u8]>>
+    pub files: &'a HashMap<String, Cow<'static, [u8]>>,
 }
 
 impl VkContextOwned {
@@ -73,12 +77,7 @@ impl<'a> VkContextView<'a> {
     /// Returns a pair `(&DeviceCommands, vk::Device)` that implements
     /// `DeviceV1_0`, allowing us to call Vulkan device functions.
     #[inline]
-    pub fn vk_device(
-        &self,
-    ) -> (
-        &vk::DeviceCommands,
-        vk::Device,
-    ) {
+    pub fn vk_device(&self) -> (&vk::DeviceCommands, vk::Device) {
         (&self.owned.device_commands, self.owned.device)
     }
 }

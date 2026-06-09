@@ -19,17 +19,19 @@ impl VkBackend {
     /// # Safety
     /// All Vulkan handles must be valid.
     pub unsafe fn to_vk_context(&self) -> ark_vk_binding::VkContextOwned {
-        unsafe { ark_vk_binding::VkContextOwned::new(
-            self.instance,
-            self.device,
-            self.device_commands,
-            self.vma,
-            self.graphics_queue,
-            self.compute_queue,
-            self.transfer_queue,
-            self.graphics_queue_family_index,
-            self.compute_queue_family_index,
-            self.transfer_queue_family_index,
-        )}
+        unsafe {
+            ark_vk_binding::VkContextOwned::new(
+                self.instance,
+                self.device,
+                self.device_commands,
+                self.vma,
+                self.graphics_queue,
+                self.compute_queue,
+                self.transfer_queue,
+                self.graphics_queue_family_index,
+                self.compute_queue_family_index,
+                self.transfer_queue_family_index,
+            )
+        }
     }
 }

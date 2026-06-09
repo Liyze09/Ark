@@ -1,27 +1,22 @@
 use std::{borrow::Cow, collections::HashMap, ffi::CStr};
 
 use vulkanalia::{
-    loader::{LibloadingLoader, LIBRARY},
-    vk::{self, DeviceV1_0, EntryV1_0, HasBuilder, InstanceV1_0},
     Entry, Instance,
+    loader::{LIBRARY, LibloadingLoader},
+    vk::{self, DeviceV1_0, EntryV1_0, HasBuilder, InstanceV1_0},
 };
-use vulkanalia_vma::vma::VmaAllocator;
 use vulkanalia_vma::Allocator;
+use vulkanalia_vma::vma::VmaAllocator;
 use wasmtime::component::Resource;
 use wasmtime_wasi::ResourceTable;
 
-use ark_vk_binding::{VkContextOwned, VkContextView};
 use ark_vk_binding::binding::ark::gpu::{
-    buffer::Host as BufHost,
-    buffer::HostBuffer as BufResource,
+    buffer::Host as BufHost, buffer::HostBuffer as BufResource, command_buffer::Host as CmdHost,
+    command_buffer::HostCommandBufferBuilder as CmdBuilder, descriptor::Host as DescHost,
+    pipeline::Host as PipeHost, queue::Host as QueueHost, queue::HostQueue,
     shader::Host as ShaderHost,
-    descriptor::Host as DescHost,
-    pipeline::Host as PipeHost,
-    command_buffer::Host as CmdHost,
-    command_buffer::HostCommandBufferBuilder as CmdBuilder,
-    queue::Host as QueueHost,
-    queue::HostQueue,
 };
+use ark_vk_binding::{VkContextOwned, VkContextView};
 
 // ── Test infrastructure ───────────────────────────────────────────────
 
@@ -49,7 +44,11 @@ impl VkTestCtx {
         };
         let layer_ptrs: Vec<*const i8> = layers.iter().map(|l| l.as_ptr()).collect();
 
-        let extensions = vec![vk::KHR_GET_PHYSICAL_DEVICE_PROPERTIES2_EXTENSION.name.as_ptr()];
+        let extensions = vec![
+            vk::KHR_GET_PHYSICAL_DEVICE_PROPERTIES2_EXTENSION
+                .name
+                .as_ptr(),
+        ];
 
         let instance_info = vk::InstanceCreateInfo::builder()
             .application_info(&app_info)
@@ -69,8 +68,7 @@ impl VkTestCtx {
             .descriptor_binding_partially_bound(true)
             .runtime_descriptor_array(true)
             .buffer_device_address(true);
-        let mut vk13 = vk::PhysicalDeviceVulkan13Features::builder()
-            .dynamic_rendering(true);
+        let mut vk13 = vk::PhysicalDeviceVulkan13Features::builder().dynamic_rendering(true);
 
         let queue_priorities = [1.0f32];
         let mut unique_qfs = vec![graphics_qf, compute_qf, transfer_qf];
@@ -125,7 +123,12 @@ impl VkTestCtx {
             )
         };
 
-        Self { _entry: entry, _instance: instance, _device: device, owned }
+        Self {
+            _entry: entry,
+            _instance: instance,
+            _device: device,
+            owned,
+        }
     }
 
     fn ctx_view<'a>(
@@ -133,14 +136,22 @@ impl VkTestCtx {
         table: &'a mut ResourceTable,
         files: &'a HashMap<String, Cow<'static, [u8]>>,
     ) -> VkContextView<'a> {
-        VkContextView { owned, table, files }
+        VkContextView {
+            owned,
+            table,
+            files,
+        }
     }
 }
 
 fn has_validation_layer(entry: &Entry) -> bool {
-    let Ok(props) = (unsafe { entry.enumerate_instance_layer_properties() }) else { return false };
+    let Ok(props) = (unsafe { entry.enumerate_instance_layer_properties() }) else {
+        return false;
+    };
     let target = c"VK_LAYER_KHRONOS_validation";
-    props.iter().any(|lp| unsafe { CStr::from_ptr(lp.layer_name.as_ptr()) } == target)
+    props
+        .iter()
+        .any(|lp| unsafe { CStr::from_ptr(lp.layer_name.as_ptr()) } == target)
 }
 
 fn pick_physical_device(
@@ -152,8 +163,12 @@ fn pick_physical_device(
         let props = unsafe { instance.get_physical_device_properties(pd) };
         let qf_props = unsafe { instance.get_physical_device_queue_family_properties(pd) };
 
-        let graphics = qf_props.iter().position(|p| p.queue_flags.contains(vk::QueueFlags::GRAPHICS));
-        let compute = qf_props.iter().position(|p| p.queue_flags.contains(vk::QueueFlags::COMPUTE));
+        let graphics = qf_props
+            .iter()
+            .position(|p| p.queue_flags.contains(vk::QueueFlags::GRAPHICS));
+        let compute = qf_props
+            .iter()
+            .position(|p| p.queue_flags.contains(vk::QueueFlags::COMPUTE));
         let transfer = qf_props.iter().position(|p| {
             p.queue_flags.contains(vk::QueueFlags::TRANSFER)
                 && !p.queue_flags.contains(vk::QueueFlags::GRAPHICS)
@@ -177,8 +192,11 @@ fn pick_physical_device(
 struct ComputePipelineSet {
     pl: wasmtime::component::Resource<ark_vk_binding::binding::ark::gpu::pipeline::PipelineLayout>,
     cp: wasmtime::component::Resource<ark_vk_binding::binding::ark::gpu::pipeline::ComputePipeline>,
-    dsl: wasmtime::component::Resource<ark_vk_binding::binding::ark::gpu::descriptor::DescriptorSetLayout>,
-    set: wasmtime::component::Resource<ark_vk_binding::binding::ark::gpu::descriptor::DescriptorSet>,
+    dsl: wasmtime::component::Resource<
+        ark_vk_binding::binding::ark::gpu::descriptor::DescriptorSetLayout,
+    >,
+    set:
+        wasmtime::component::Resource<ark_vk_binding::binding::ark::gpu::descriptor::DescriptorSet>,
 }
 
 fn build_compute_pipeline(
@@ -206,26 +224,39 @@ fn build_compute_pipeline(
     }];
     let dsl = v.create_descriptor_set_layout(bindings).expect("dsl");
 
-    let pool = v.create_descriptor_pool(
-        1,
-        vec![PoolSize { descriptor_type: DescriptorType::StorageBuffer, descriptor_count: 1 }],
-        DescriptorPoolCreateFlags::empty(),
-    ).expect("pool");
+    let pool = v
+        .create_descriptor_pool(
+            1,
+            vec![PoolSize {
+                descriptor_type: DescriptorType::StorageBuffer,
+                descriptor_count: 1,
+            }],
+            DescriptorPoolCreateFlags::empty(),
+        )
+        .expect("pool");
     // Borrow dsl for allocation and layout creation
     let dsl_alloc = Resource::new_borrow(dsl.rep());
-    let set = v.allocate_descriptor_set(pool, dsl_alloc, vec![]).expect("allocate set");
+    let set = v
+        .allocate_descriptor_set(pool, dsl_alloc, vec![])
+        .expect("allocate set");
 
     // Borrow dsl for pipeline layout
     let dsl_layout = Resource::new_borrow(dsl.rep());
-    let pl = v.create_pipeline_layout(
-        vec![DescriptorSetInfo { layout: dsl_layout, set: 0 }],
-        vec![],
-    ).expect("pipeline layout");
+    let pl = v
+        .create_pipeline_layout(
+            vec![DescriptorSetInfo {
+                layout: dsl_layout,
+                set: 0,
+            }],
+            vec![],
+        )
+        .expect("pipeline layout");
 
     // Borrow pl and shader for pipeline creation
     let pl_cp = Resource::new_borrow(pl.rep());
     let shader_cp = Resource::new_borrow(shader.rep());
-    let cp = v.create_compute_pipeline(pl_cp, shader_cp, entry.into())
+    let cp = v
+        .create_compute_pipeline(pl_cp, shader_cp, entry.into())
         .expect("compute pipeline");
 
     ComputePipelineSet { pl, cp, dsl, set }
@@ -251,7 +282,8 @@ fn compute_add_f32() {
             uint idx = gl_GlobalInvocationID.x;
             v[idx] = v[idx] + 1.0;
         }",
-        "main", shaderc::ShaderKind::Compute,
+        "main",
+        shaderc::ShaderKind::Compute,
     );
 
     // Input buffer
@@ -266,10 +298,15 @@ fn compute_add_f32() {
         usage: BufferUsage::STORAGE_BUFFER | BufferUsage::TRANSFER_SRC | BufferUsage::TRANSFER_DST,
         sharing_mode: None,
     };
-    let alloc = AllocateInfo { memory_type: MemoryType::PREFER_DEVICE | MemoryType::HOST_SEQUENTIAL_WRITE };
+    let alloc = AllocateInfo {
+        memory_type: MemoryType::PREFER_DEVICE | MemoryType::HOST_SEQUENTIAL_WRITE,
+    };
     let data_bytes =
-        unsafe { std::slice::from_raw_parts(data_in.as_ptr() as *const u8, (N as usize) * 4) }.to_vec();
-    let buf = v.buffer_from_data(create_info, alloc, data_bytes).expect("create buffer");
+        unsafe { std::slice::from_raw_parts(data_in.as_ptr() as *const u8, (N as usize) * 4) }
+            .to_vec();
+    let buf = v
+        .buffer_from_data(create_info, alloc, data_bytes)
+        .expect("create buffer");
 
     let cps = build_compute_pipeline(v, &spirv, "main");
 
@@ -281,12 +318,19 @@ fn compute_add_f32() {
     v.write_descriptor_set(
         Resource::new_borrow(cps.set.rep()),
         vec![DescriptorWrite {
-            binding: 0, dst_array_element: 0, descriptor_count: 1,
+            binding: 0,
+            dst_array_element: 0,
+            descriptor_count: 1,
             descriptor_type: DescriptorType::StorageBuffer,
-            buffer_info: Some(BufferDescriptorInfo { buffer: Resource::new_borrow(buf.rep()), offset: 0, range: N * 4 }),
+            buffer_info: Some(BufferDescriptorInfo {
+                buffer: Resource::new_borrow(buf.rep()),
+                offset: 0,
+                range: N * 4,
+            }),
             image_info: None,
         }],
-    ).expect("write descriptor");
+    )
+    .expect("write descriptor");
 
     use ark_vk_binding::binding::ark::gpu::{
         command_buffer::{CommandBufferUsage, PipelineBindPoint},
@@ -295,18 +339,39 @@ fn compute_add_f32() {
 
     // Record
     let builder = v.primary_command_buffer(QueueFamily::Compute, CommandBufferUsage::OneTimeSubmit);
-    v.bind_compute_pipeline(Resource::new_borrow(builder.rep()), Resource::new_borrow(cps.cp.rep())).expect("bind cp");
+    v.bind_compute_pipeline(
+        Resource::new_borrow(builder.rep()),
+        Resource::new_borrow(cps.cp.rep()),
+    )
+    .expect("bind cp");
     v.bind_descriptor_sets(
-        Resource::new_borrow(builder.rep()), PipelineBindPoint::Compute,
-        Resource::new_borrow(cps.pl.rep()), 0,
+        Resource::new_borrow(builder.rep()),
+        PipelineBindPoint::Compute,
+        Resource::new_borrow(cps.pl.rep()),
+        0,
         vec![Resource::new_borrow(cps.set.rep())],
-    ).expect("bind ds");
-    v.dispatch(Resource::new_borrow(builder.rep()), (N as u32).div_ceil(64), 1, 1).expect("dispatch");
+    )
+    .expect("bind ds");
+    v.dispatch(
+        Resource::new_borrow(builder.rep()),
+        (N as u32).div_ceil(64),
+        1,
+        1,
+    )
+    .expect("dispatch");
 
     let cb = v.build_command_buffer(builder);
     let q = v.compute();
-    v.submit(Resource::new_borrow(q.rep()), vec![Resource::new_borrow(cb.rep())], vec![], vec![], None).expect("submit");
-    v.wait_idle(Resource::new_borrow(q.rep())).expect("wait idle");
+    v.submit(
+        Resource::new_borrow(q.rep()),
+        vec![Resource::new_borrow(cb.rep())],
+        vec![],
+        vec![],
+        None,
+    )
+    .expect("submit");
+    v.wait_idle(Resource::new_borrow(q.rep()))
+        .expect("wait idle");
 
     // Verify
     let result_bytes = v.read(buf, 0, N * 4).expect("read buffer");
@@ -315,9 +380,17 @@ fn compute_add_f32() {
 
     for i in 0..N as usize {
         let expected = i as f32 + 1.0;
-        assert!((result_f32[i] - expected).abs() < 0.005, "[{i}] expected {expected}, got {}", result_f32[i]);
+        assert!(
+            (result_f32[i] - expected).abs() < 0.005,
+            "[{i}] expected {expected}, got {}",
+            result_f32[i]
+        );
     }
-    println!("✓ compute_add_f32: {N} elements OK (first={:.1}, last={:.1})", result_f32[0], result_f32[N as usize - 1]);
+    println!(
+        "✓ compute_add_f32: {N} elements OK (first={:.1}, last={:.1})",
+        result_f32[0],
+        result_f32[N as usize - 1]
+    );
 }
 
 // ── Test 2: compute shader render triangle to PNG ─────────────────────
@@ -364,7 +437,8 @@ fn render_triangle_to_png() {
             uint a = 255u;
             pixels[idx] = (a << 24) | (b << 16) | (g << 8) | r;
         }",
-        "main", shaderc::ShaderKind::Compute,
+        "main",
+        shaderc::ShaderKind::Compute,
     );
 
     use ark_vk_binding::binding::ark::gpu::{
@@ -378,9 +452,12 @@ fn render_triangle_to_png() {
         usage: BufferUsage::STORAGE_BUFFER | BufferUsage::TRANSFER_SRC | BufferUsage::TRANSFER_DST,
         sharing_mode: None,
     };
-    let alloc = AllocateInfo { memory_type: MemoryType::PREFER_DEVICE | MemoryType::HOST_RANDOM_ACCESS };
+    let alloc = AllocateInfo {
+        memory_type: MemoryType::PREFER_DEVICE | MemoryType::HOST_RANDOM_ACCESS,
+    };
     // buffer_from_data forces HOST_VISIBLE memory; buffer_zeroed does not.
-    let out_buf = v.buffer_from_data(create_info, alloc, vec![0u8; img_size as usize])
+    let out_buf = v
+        .buffer_from_data(create_info, alloc, vec![0u8; img_size as usize])
         .expect("create output buffer");
 
     let cps = build_compute_pipeline(v, &spirv, "main");
@@ -392,12 +469,19 @@ fn render_triangle_to_png() {
     v.write_descriptor_set(
         Resource::new_borrow(cps.set.rep()),
         vec![DescriptorWrite {
-            binding: 0, dst_array_element: 0, descriptor_count: 1,
+            binding: 0,
+            dst_array_element: 0,
+            descriptor_count: 1,
             descriptor_type: DescriptorType::StorageBuffer,
-            buffer_info: Some(BufferDescriptorInfo { buffer: Resource::new_borrow(out_buf.rep()), offset: 0, range: img_size }),
+            buffer_info: Some(BufferDescriptorInfo {
+                buffer: Resource::new_borrow(out_buf.rep()),
+                offset: 0,
+                range: img_size,
+            }),
             image_info: None,
         }],
-    ).expect("write descriptor");
+    )
+    .expect("write descriptor");
 
     use ark_vk_binding::binding::ark::gpu::{
         command_buffer::{CommandBufferUsage, PipelineBindPoint},
@@ -405,18 +489,39 @@ fn render_triangle_to_png() {
     };
 
     let builder = v.primary_command_buffer(QueueFamily::Compute, CommandBufferUsage::OneTimeSubmit);
-    v.bind_compute_pipeline(Resource::new_borrow(builder.rep()), Resource::new_borrow(cps.cp.rep())).expect("bind cp");
+    v.bind_compute_pipeline(
+        Resource::new_borrow(builder.rep()),
+        Resource::new_borrow(cps.cp.rep()),
+    )
+    .expect("bind cp");
     v.bind_descriptor_sets(
-        Resource::new_borrow(builder.rep()), PipelineBindPoint::Compute,
-        Resource::new_borrow(cps.pl.rep()), 0,
+        Resource::new_borrow(builder.rep()),
+        PipelineBindPoint::Compute,
+        Resource::new_borrow(cps.pl.rep()),
+        0,
         vec![Resource::new_borrow(cps.set.rep())],
-    ).expect("bind ds");
-    v.dispatch(Resource::new_borrow(builder.rep()), W.div_ceil(8), H.div_ceil(8), 1).expect("dispatch");
+    )
+    .expect("bind ds");
+    v.dispatch(
+        Resource::new_borrow(builder.rep()),
+        W.div_ceil(8),
+        H.div_ceil(8),
+        1,
+    )
+    .expect("dispatch");
 
     let cb = v.build_command_buffer(builder);
     let q = v.compute();
-    v.submit(Resource::new_borrow(q.rep()), vec![Resource::new_borrow(cb.rep())], vec![], vec![], None).expect("submit");
-    v.wait_idle(Resource::new_borrow(q.rep())).expect("wait idle");
+    v.submit(
+        Resource::new_borrow(q.rep()),
+        vec![Resource::new_borrow(cb.rep())],
+        vec![],
+        vec![],
+        None,
+    )
+    .expect("submit");
+    v.wait_idle(Resource::new_borrow(q.rep()))
+        .expect("wait idle");
 
     // Read back
     let result = v.read(out_buf, 0, img_size).expect("read back");
@@ -481,7 +586,9 @@ fn graphics_pipeline_triangle() {
     let frag_mod = v.shader_from_bytes(frag_spirv).expect("frag shader module");
 
     // Empty pipeline layout (no descriptors, no push constants)
-    let pl = v.create_pipeline_layout(vec![], vec![]).expect("pipeline layout");
+    let pl = v
+        .create_pipeline_layout(vec![], vec![])
+        .expect("pipeline layout");
 
     use ark_vk_binding::binding::ark::gpu::pipeline::{
         GraphicsPipelineCreateInfo, PrimitiveTopology,
@@ -498,7 +605,9 @@ fn graphics_pipeline_triangle() {
         color_format: vk::Format::R8G8B8A8_UNORM.as_raw() as u32,
         dynamic_rendering: true,
     };
-    let gp = v.create_graphics_pipeline(gp_info).expect("graphics pipeline");
+    let gp = v
+        .create_graphics_pipeline(gp_info)
+        .expect("graphics pipeline");
 
     // ── Render target image ────────────────────────────────────────
 
@@ -514,7 +623,11 @@ fn graphics_pipeline_triangle() {
     let img_create = ImageCreateInfo {
         image_type: ImageType::Dim2d,
         format: vk::Format::R8G8B8A8_UNORM.as_raw() as u32,
-        extent: Extent3d { width: W, height: H, depth: 1 },
+        extent: Extent3d {
+            width: W,
+            height: H,
+            depth: 1,
+        },
         mip_levels: 1,
         array_layers: 1,
         samples: SampleCount::Sample1,
@@ -522,7 +635,9 @@ fn graphics_pipeline_triangle() {
         usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_SRC,
         create_flags: ImageCreateFlags::empty(),
     };
-    let img_alloc = AllocateInfo { memory_type: MemoryType::PREFER_DEVICE };
+    let img_alloc = AllocateInfo {
+        memory_type: MemoryType::PREFER_DEVICE,
+    };
     let img = v.create_image(img_create, img_alloc).expect("create image");
 
     let view_create = ImageViewCreateInfo {
@@ -551,23 +666,25 @@ fn graphics_pipeline_triangle() {
     let staging_alloc = AllocateInfo {
         memory_type: MemoryType::PREFER_HOST | MemoryType::HOST_RANDOM_ACCESS,
     };
-    let staging = v.buffer_from_data(staging_create, staging_alloc, vec![0u8; img_bytes as usize])
+    let staging = v
+        .buffer_from_data(staging_create, staging_alloc, vec![0u8; img_bytes as usize])
         .expect("staging buffer");
 
     // ── Record command buffer ──────────────────────────────────────
 
     use ark_vk_binding::binding::ark::gpu::{
         command_buffer::{
-            BufferImageCopy, CommandBufferUsage, ImageAspectFlags, ImageBarrier,
-            ImageSubresourceLayers, ImageSubresourceRange, MemoryBarrier, Offset3d,
-            RenderingColorAttachment, Rect2d, RenderingDepthStencilAttachment, Viewport,
-            Host as CmdHost, HostCommandBufferBuilder,
+            BufferImageCopy, CommandBufferUsage, Host as CmdHost, HostCommandBufferBuilder,
+            ImageAspectFlags, ImageBarrier, ImageSubresourceLayers, ImageSubresourceRange,
+            MemoryBarrier, Offset3d, Rect2d, RenderingColorAttachment,
+            RenderingDepthStencilAttachment, Viewport,
         },
         core::QueueFamily,
         queue::Host as QueueHost,
     };
 
-    let builder = v.primary_command_buffer(QueueFamily::Graphics, CommandBufferUsage::OneTimeSubmit);
+    let builder =
+        v.primary_command_buffer(QueueFamily::Graphics, CommandBufferUsage::OneTimeSubmit);
     // b is no longer used; replaced by Resource::new_borrow at each call site
 
     // Pipeline barrier: undefined → color attachment optimal
@@ -597,7 +714,12 @@ fn graphics_pipeline_triangle() {
     .expect("barrier");
 
     // Begin rendering
-    let render_area = Rect2d { offset_x: 0, offset_y: 0, width: W, height: H };
+    let render_area = Rect2d {
+        offset_x: 0,
+        offset_y: 0,
+        width: W,
+        height: H,
+    };
     let color_attachment = RenderingColorAttachment {
         image_view: Resource::new_borrow(view.rep()),
         image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL.as_raw() as u32,
@@ -605,9 +727,11 @@ fn graphics_pipeline_triangle() {
         resolve_image_layout: 0,
         load_op: vk::AttachmentLoadOp::CLEAR.as_raw() as u32,
         store_op: vk::AttachmentStoreOp::STORE.as_raw() as u32,
-        clear_value: Some(ark_vk_binding::binding::ark::gpu::command_buffer::ClearColor {
-            floats: (0.1, 0.1, 0.15, 1.0),
-        }),
+        clear_value: Some(
+            ark_vk_binding::binding::ark::gpu::command_buffer::ClearColor {
+                floats: (0.1, 0.1, 0.15, 1.0),
+            },
+        ),
     };
 
     v.begin_rendering(
@@ -626,13 +750,24 @@ fn graphics_pipeline_triangle() {
     )
     .expect("bind graphics pipeline");
 
-    let vp = Viewport { x: 0.0, y: 0.0, width: W as f32, height: H as f32, min_depth: 0.0, max_depth: 1.0 };
-    v.set_viewport(Resource::new_borrow(builder.rep()), 0, vec![vp]).expect("set viewport");
-    v.set_scissor(Resource::new_borrow(builder.rep()), 0, vec![render_area]).expect("set scissor");
+    let vp = Viewport {
+        x: 0.0,
+        y: 0.0,
+        width: W as f32,
+        height: H as f32,
+        min_depth: 0.0,
+        max_depth: 1.0,
+    };
+    v.set_viewport(Resource::new_borrow(builder.rep()), 0, vec![vp])
+        .expect("set viewport");
+    v.set_scissor(Resource::new_borrow(builder.rep()), 0, vec![render_area])
+        .expect("set scissor");
 
-    v.draw(Resource::new_borrow(builder.rep()), 3, 1, 0, 0).expect("draw");
+    v.draw(Resource::new_borrow(builder.rep()), 3, 1, 0, 0)
+        .expect("draw");
 
-    v.end_rendering(Resource::new_borrow(builder.rep())).expect("end rendering");
+    v.end_rendering(Resource::new_borrow(builder.rep()))
+        .expect("end rendering");
 
     // Pipeline barrier: color attachment → transfer src
     v.pipeline_barrier(
@@ -672,7 +807,11 @@ fn graphics_pipeline_triangle() {
             layer_count: 1,
         },
         image_offset: Offset3d { x: 0, y: 0, z: 0 },
-        image_extent: Extent3d { width: W, height: H, depth: 1 },
+        image_extent: Extent3d {
+            width: W,
+            height: H,
+            depth: 1,
+        },
     };
     v.copy_image_to_buffer(
         Resource::new_borrow(builder.rep()),
@@ -688,9 +827,16 @@ fn graphics_pipeline_triangle() {
     // ── Submit ─────────────────────────────────────────────────────
 
     let q = v.graphics();
-    v.submit(Resource::new_borrow(q.rep()), vec![Resource::new_borrow(cb.rep())], vec![], vec![], None)
-        .expect("submit");
-    v.wait_idle(Resource::new_borrow(q.rep())).expect("wait idle");
+    v.submit(
+        Resource::new_borrow(q.rep()),
+        vec![Resource::new_borrow(cb.rep())],
+        vec![],
+        vec![],
+        None,
+    )
+    .expect("submit");
+    v.wait_idle(Resource::new_borrow(q.rep()))
+        .expect("wait idle");
 
     // ── Read back and save PNG ─────────────────────────────────────
 
@@ -708,7 +854,6 @@ fn graphics_pipeline_triangle() {
     writer.write_image_data(&result).expect("write PNG data");
     drop(writer);
     println!("✓ graphics_pipeline_triangle: written to {path}");
-
 }
 
 // ── GLSL compilation helper ───────────────────────────────────────────
@@ -717,7 +862,10 @@ fn compile_glsl(source: &str, entry: &str, kind: shaderc::ShaderKind) -> Vec<u32
     let compiler = shaderc::Compiler::new().expect("shaderc compiler");
     let mut options = shaderc::CompileOptions::new().expect("shaderc options");
     options.set_source_language(shaderc::SourceLanguage::GLSL);
-    options.set_target_env(shaderc::TargetEnv::Vulkan, shaderc::EnvVersion::Vulkan1_3 as u32);
+    options.set_target_env(
+        shaderc::TargetEnv::Vulkan,
+        shaderc::EnvVersion::Vulkan1_3 as u32,
+    );
     options.set_optimization_level(shaderc::OptimizationLevel::Zero);
 
     let result = compiler

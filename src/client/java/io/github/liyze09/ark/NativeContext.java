@@ -187,7 +187,14 @@ public final class NativeContext {
         }
     }
 
-    // ── Log/fatal callbacks (invoked from Rust side via FFM upcall stubs) ──
+    private final long address;
+    private final AtomicBoolean destroyed = new AtomicBoolean(false);
+    private volatile boolean defunct;
+    private volatile List<String> fatalErrors = List.of();
+
+    private NativeContext(long address) {
+        this.address = address;
+    }
 
     private static void onLogTrace(@NonNull MemorySegment msg) {
         Ark.LOGGER.trace(msg.getString(0));
@@ -217,18 +224,51 @@ public final class NativeContext {
         }
     }
 
-    // ── Instance state ─────────────────────────────────────────────────────
+    public static @NotNull NativeContext create(
+            long instanceHandle, long deviceHandle, long vmaHandle,
+            VulkanQueue graphicsQueue, VulkanQueue computeQueue, VulkanQueue transferQueue,
+            Path extensionFolder
+    ) {
+        try (var arena = Arena.ofConfined()) {
+            var pathSegment = arena.allocateFrom(extensionFolder.toAbsolutePath().toString());
 
-    private final long address;
-    private final AtomicBoolean destroyed = new AtomicBoolean(false);
-    private volatile boolean defunct;
-    private volatile List<String> fatalErrors = List.of();
+            long address = (long) CREATE_NATIVE_CONTEXT.invokeExact(
+                    instanceHandle, deviceHandle, vmaHandle,
+                    graphicsQueue.vkQueue().address(),
+                    computeQueue.vkQueue().address(),
+                    transferQueue.vkQueue().address(),
+                    graphicsQueue.queueFamilyIndex(),
+                    computeQueue.queueFamilyIndex(),
+                    transferQueue.queueFamilyIndex(),
+                    pathSegment
+            );
 
-    private NativeContext(long address) {
-        this.address = address;
+            if (address == 0) {
+                Ark.LOGGER.error("ark_create_native_context returned null");
+                throw new FatalNativeException("Failed to create Ark native context due to unknown error.");
+            }
+
+            return new NativeContext(address);
+        } catch (Throwable t) {
+            Ark.LOGGER.error("Failed to call ark_create_native_context", t);
+            throw new RuntimeException(t);
+        }
     }
 
-    // ── Fatal error handling ───────────────────────────────────────────────
+    private static @Nullable String toJsonArray(@Nullable List<String> items) {
+        if (items == null || items.isEmpty()) {
+            return null;
+        }
+        var sb = new StringBuilder("[");
+        for (int i = 0; i < items.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append('"');
+            sb.append(items.get(i).replace("\\", "\\\\").replace("\"", "\\\""));
+            sb.append('"');
+        }
+        sb.append(']');
+        return sb.toString();
+    }
 
     /**
      * Called by the static {@link #onFatal} callback (from native panic handler).
@@ -276,8 +316,6 @@ public final class NativeContext {
         }
     }
 
-    // ── Guard helpers ──────────────────────────────────────────────────────
-
     /**
      * Entry check: throws {@link FatalNativeException} if the context is
      * already defunct (a native panic occurred earlier).
@@ -287,6 +325,8 @@ public final class NativeContext {
             throw new FatalNativeException("Native context is defunct");
         }
     }
+
+    // ── Lifecycle ──────────────────────────────────────────────────────────
 
     /**
      * Exit check: if the context became defunct during the native call,
@@ -299,40 +339,6 @@ public final class NativeContext {
         this.destroy();
         throw new FatalNativeException("Native context destroyed due to fatal native error");
     }
-
-    // ── Factory ────────────────────────────────────────────────────────────
-    public static @NotNull NativeContext create(
-            long instanceHandle, long deviceHandle, long vmaHandle,
-            VulkanQueue graphicsQueue, VulkanQueue computeQueue, VulkanQueue transferQueue,
-            Path extensionFolder
-    ) {
-        try (var arena = Arena.ofConfined()) {
-            var pathSegment = arena.allocateFrom(extensionFolder.toAbsolutePath().toString());
-
-            long address = (long) CREATE_NATIVE_CONTEXT.invokeExact(
-                    instanceHandle, deviceHandle, vmaHandle,
-                    graphicsQueue.vkQueue().address(),
-                    computeQueue.vkQueue().address(),
-                    transferQueue.vkQueue().address(),
-                    graphicsQueue.queueFamilyIndex(),
-                    computeQueue.queueFamilyIndex(),
-                    transferQueue.queueFamilyIndex(),
-                    pathSegment
-            );
-
-            if (address == 0) {
-                Ark.LOGGER.error("ark_create_native_context returned null");
-                throw new FatalNativeException("Failed to create Ark native context due to unknown error.");
-            }
-
-            return new NativeContext(address);
-        } catch (Throwable t) {
-            Ark.LOGGER.error("Failed to call ark_create_native_context", t);
-            throw new RuntimeException(t);
-        }
-    }
-
-    // ── Lifecycle ──────────────────────────────────────────────────────────
 
     /**
      * Releases the native context.  Idempotent — subsequent calls are no-ops.
@@ -347,8 +353,6 @@ public final class NativeContext {
             Ark.LOGGER.error("Failed to call ark_destroy_native_context", t);
         }
     }
-
-    // ── error retrieval ────────────────────────────────────────────────────
 
     /// Pops the most recent error from the native context, or null if empty.
     public @Nullable String popError() {
@@ -386,6 +390,8 @@ public final class NativeContext {
         }
     }
 
+    // ── extension management ───────────────────────────────────────────────
+
     /// Drains all pending errors from the native context into a list.
     /// If the context is defunct, returns the errors that were collected
     /// during the fatal event.
@@ -409,8 +415,6 @@ public final class NativeContext {
             exit();
         }
     }
-
-    // ── extension management ───────────────────────────────────────────────
 
     /// Loads an extension from a zip file in the extension folder.
     ///
@@ -483,6 +487,7 @@ public final class NativeContext {
 
     /// Disables an extension: runs its close function and removes its hooks.
     /// The extension remains loaded but inactive.
+    ///
     /// @throws NativeException if the native call fails
     public void disableExtension(String id) {
         enter();
@@ -504,6 +509,7 @@ public final class NativeContext {
     }
 
     /// Unloads an extension: disables it and removes it from memory.
+    ///
     /// @throws NativeException if the native call fails
     public void unloadExtension(String id) {
         enter();
@@ -526,6 +532,7 @@ public final class NativeContext {
 
     /// Sets the enabled Vulkan feature names on the native side, as a JSON array.
     /// This populates the sets queried by WASM extensions via check_vulkan_feature().
+    ///
     /// @throws NativeException if the native call fails
     public void setEnabledVulkanFeatures(@Nullable List<String> features) {
         enter();
@@ -549,6 +556,7 @@ public final class NativeContext {
 
     /// Sets the enabled Vulkan extension names on the native side, as a JSON array.
     /// This populates the sets queried by WASM extensions via check_vulkan_extension().
+    ///
     /// @throws NativeException if the native call fails
     public void setEnabledVulkanExtensions(@Nullable List<String> extensions) {
         enter();
@@ -577,22 +585,5 @@ public final class NativeContext {
     @Override
     public String toString() {
         return Long.toHexString(this.getAddress());
-    }
-
-    // ── helpers ────────────────────────────────────────────────────────────
-
-    private static @Nullable String toJsonArray(@Nullable List<String> items) {
-        if (items == null || items.isEmpty()) {
-            return null;
-        }
-        var sb = new StringBuilder("[");
-        for (int i = 0; i < items.size(); i++) {
-            if (i > 0) sb.append(',');
-            sb.append('"');
-            sb.append(items.get(i).replace("\\", "\\\\").replace("\"", "\\\""));
-            sb.append('"');
-        }
-        sb.append(']');
-        return sb.toString();
     }
 }

@@ -4,22 +4,21 @@ use vulkanalia_vma::Alloc;
 use wasmtime::component::Resource;
 
 use crate::{
+    VkContextView,
     binding::{
         ark::gpu::{
             core::VulkanError,
             image::{
-                BorderColor, CompareOp, Filter, Host, HostImage,
-                HostImageView, HostSampler, Image, ImageAspectFlags, ImageCreateFlags,
-                ImageCreateInfo, ImageTiling, ImageType, ImageUsage, ImageView,
-                ImageViewCreateInfo, ImageViewType, SampleCount, Sampler, SamplerAddressMode,
-                SamplerCreateInfo, SamplerMipmapMode,
+                BorderColor, CompareOp, Filter, Host, HostImage, HostImageView, HostSampler, Image,
+                ImageAspectFlags, ImageCreateFlags, ImageCreateInfo, ImageTiling, ImageType,
+                ImageUsage, ImageView, ImageViewCreateInfo, ImageViewType, SampleCount, Sampler,
+                SamplerAddressMode, SamplerCreateInfo, SamplerMipmapMode,
             },
             memory::AllocateInfo,
         },
         memory::vma_alloc_options,
         vk_err,
     },
-    VkContextView,
 };
 
 pub(crate) struct GpuImage {

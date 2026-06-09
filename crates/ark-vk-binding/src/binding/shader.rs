@@ -3,6 +3,7 @@ use vulkanalia::vk;
 use wasmtime::component::Resource;
 
 use crate::{
+    VkContextView,
     binding::{
         ark::gpu::{
             core::VulkanError,
@@ -10,7 +11,6 @@ use crate::{
         },
         vk_err,
     },
-    VkContextView,
 };
 
 pub(crate) struct GpuShaderModule {
@@ -37,7 +37,10 @@ impl Host for VkContextView<'_> {
 
     fn shader_from_package(&mut self, path: String) -> Result<Resource<ShaderModule>, VulkanError> {
         let Some(spirv_bytes) = self.files.get(&path) else {
-            return Err(VulkanError::Unnamed(format!("shader not found in package: {}", path)));
+            return Err(VulkanError::Unnamed(format!(
+                "shader not found in package: {}",
+                path
+            )));
         };
 
         if spirv_bytes.len() % 4 != 0 {

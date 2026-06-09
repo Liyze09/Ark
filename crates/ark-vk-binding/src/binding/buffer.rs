@@ -3,6 +3,7 @@ use vulkanalia_vma::Alloc;
 use wasmtime::component::Resource;
 
 use crate::{
+    VkContextView,
     binding::{
         ark::{
             self,
@@ -16,7 +17,6 @@ use crate::{
         sync::vk_sharing_mode,
         vk_err,
     },
-    VkContextView,
 };
 
 pub(crate) struct GpuBuffer {
@@ -261,12 +261,12 @@ impl ark::gpu::buffer::HostBuffer for VkContextView<'_> {
         Ok(())
     }
 
-    fn access(
-        &mut self,
-        self_: Resource<Buffer>,
-    ) -> Result<Resource<BufferAccessor>, VulkanError> {
+    fn access(&mut self, self_: Resource<Buffer>) -> Result<Resource<BufferAccessor>, VulkanError> {
         let key = Resource::<GpuBuffer>::new_borrow(self_.rep());
-        let buf = self.table.get(&key).map_err(|_| VulkanError::InvalidBuffer)?;
+        let buf = self
+            .table
+            .get(&key)
+            .map_err(|_| VulkanError::InvalidBuffer)?;
 
         // VMA ref-counts mappings — safe to map even if already mapped
         // during initial data upload.

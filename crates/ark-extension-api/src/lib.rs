@@ -57,14 +57,12 @@ impl Log for HostLogger {
         }
     }
 
-    fn flush(&self) {
-        
-    }
+    fn flush(&self) {}
 }
 
-pub use crate::vk::ark::gpu as vulkan;
-pub use crate::ark::core as core;
+pub use crate::ark::core;
 pub use crate::reg::exports::ark::core::entrance::Guest as ExtensionInitializer;
+pub use crate::vk::ark::gpu as vulkan;
 #[macro_export]
 macro_rules! initialize {
     ($ident:tt) => {

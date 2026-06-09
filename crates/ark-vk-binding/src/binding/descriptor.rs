@@ -3,18 +3,19 @@ use vulkanalia::vk::{self, HasBuilder};
 use wasmtime::component::Resource;
 
 use crate::{
+    VkContextView,
     binding::{
         ark::gpu::{
             core::VulkanError,
             descriptor::{
-                DescriptorBinding, DescriptorBindingFlags, DescriptorPool, DescriptorPoolCreateFlags,
-                DescriptorSet, DescriptorSetLayout, DescriptorType, DescriptorWrite, Host,
-                HostDescriptorPool, HostDescriptorSet, HostDescriptorSetLayout, PoolSize,
+                DescriptorBinding, DescriptorBindingFlags, DescriptorPool,
+                DescriptorPoolCreateFlags, DescriptorSet, DescriptorSetLayout, DescriptorType,
+                DescriptorWrite, Host, HostDescriptorPool, HostDescriptorSet,
+                HostDescriptorSetLayout, PoolSize,
             },
         },
         vk_err,
     },
-    VkContextView,
 };
 
 // ── Type helpers ──
@@ -50,9 +51,7 @@ fn vk_binding_flags(flags: DescriptorBindingFlags) -> vk::DescriptorBindingFlags
     vkf
 }
 
-fn vk_pool_create_flags(
-    flags: DescriptorPoolCreateFlags,
-) -> vk::DescriptorPoolCreateFlags {
+fn vk_pool_create_flags(flags: DescriptorPoolCreateFlags) -> vk::DescriptorPoolCreateFlags {
     let mut vkf = vk::DescriptorPoolCreateFlags::empty();
     if flags.contains(DescriptorPoolCreateFlags::UPDATE_AFTER_BIND) {
         vkf |= vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND;
@@ -89,7 +88,10 @@ pub(crate) struct GpuDescriptorSet {
 
 fn build_vk_bindings(
     bindings: &[DescriptorBinding],
-) -> (Vec<vk::DescriptorSetLayoutBinding>, Vec<vk::DescriptorBindingFlags>) {
+) -> (
+    Vec<vk::DescriptorSetLayoutBinding>,
+    Vec<vk::DescriptorBindingFlags>,
+) {
     let mut vk_bindings = Vec::with_capacity(bindings.len());
     let mut vk_flags = Vec::with_capacity(bindings.len());
 
@@ -113,9 +115,7 @@ impl Host for VkContextView<'_> {
         bindings: Vec<DescriptorBinding>,
     ) -> Result<Resource<DescriptorSetLayout>, VulkanError> {
         if bindings.is_empty() {
-            return Err(VulkanError::Unnamed(
-                "bindings must not be empty".into(),
-            ));
+            return Err(VulkanError::Unnamed("bindings must not be empty".into()));
         }
 
         let (vk_bindings, vk_binding_flags) = build_vk_bindings(&bindings);
@@ -152,9 +152,7 @@ impl Host for VkContextView<'_> {
         create_flags: DescriptorPoolCreateFlags,
     ) -> Result<Resource<DescriptorPool>, VulkanError> {
         if pool_sizes.is_empty() {
-            return Err(VulkanError::Unnamed(
-                "pool sizes must not be empty".into(),
-            ));
+            return Err(VulkanError::Unnamed("pool sizes must not be empty".into()));
         }
 
         let vk_pool_sizes: Vec<vk::DescriptorPoolSize> = pool_sizes
@@ -172,8 +170,8 @@ impl Host for VkContextView<'_> {
             .max_sets(max_sets)
             .flags(vk_pool_create_flags(create_flags));
 
-        let pool = unsafe { self.vk_device().create_descriptor_pool(&pool_info, None) }
-            .map_err(vk_err)?;
+        let pool =
+            unsafe { self.vk_device().create_descriptor_pool(&pool_info, None) }.map_err(vk_err)?;
 
         let freeable = create_flags.contains(DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET);
         let gpu_pool = GpuDescriptorPool { pool, freeable };
@@ -220,8 +218,8 @@ impl Host for VkContextView<'_> {
                 .build()
         };
 
-        let sets = unsafe { self.vk_device().allocate_descriptor_sets(&alloc_info) }
-            .map_err(vk_err)?;
+        let sets =
+            unsafe { self.vk_device().allocate_descriptor_sets(&alloc_info) }.map_err(vk_err)?;
 
         let gpu_set = GpuDescriptorSet {
             set: sets[0],
@@ -241,10 +239,7 @@ impl Host for VkContextView<'_> {
         writes: Vec<DescriptorWrite>,
     ) -> Result<(), VulkanError> {
         let set_key = Resource::<GpuDescriptorSet>::new_borrow(set.rep());
-        let gpu_set = self
-            .table
-            .get(&set_key)
-            .map_err(|_| VulkanError::Unknown)?;
+        let gpu_set = self.table.get(&set_key).map_err(|_| VulkanError::Unknown)?;
 
         let mut buffer_infos: Vec<vk::DescriptorBufferInfo> = Vec::new();
         let mut image_infos: Vec<vk::DescriptorImageInfo> = Vec::new();
@@ -352,10 +347,7 @@ impl HostDescriptorSet for VkContextView<'_> {
         if set.freeable {
             // Errors here are benign (the pool will free everything on
             // destruction anyway).
-            let _ = unsafe {
-                self.vk_device()
-                    .free_descriptor_sets(set.pool, &[set.set])
-            };
+            let _ = unsafe { self.vk_device().free_descriptor_sets(set.pool, &[set.set]) };
         }
         Ok(())
     }

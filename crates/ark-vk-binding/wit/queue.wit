@@ -3,31 +3,23 @@ package ark:gpu@0.1.0;
 interface queue {
     use core.{vulkan-error};
     use command-buffer.{command-buffer};
-    use sync.{semaphore, fence};
-
-    /// Describes a semaphore to wait on before queue submission proceeds,
-    /// and which pipeline stage(s) must wait.
-    record semaphore-wait-info {
-        semaphore: borrow<semaphore>,
-        /// VkPipelineStageFlags — stage(s) that wait for this semaphore.
-        wait-stage: u32,
-    }
+    use sync.{fence, semaphore-submit-info};
 
     /// A queue that commands can be submitted to.
     resource queue {
         /// Low-level submit of command buffers to this queue.
         ///
         /// `command-buffers` — one or more command buffers to execute in order.
-        /// `wait-semaphores` — semaphores to wait on before execution begins.
-        /// `signal-semaphores` — semaphores to signal after execution completes.
+        /// `waits` — semaphores to wait on before execution begins.
+        /// `signals` — semaphores to signal after execution completes.
         /// `fence` — optional fence to signal after execution is fully complete.
         ///
         /// Returns immediately after queueing; use the fence or signaled
         /// semaphores to track completion.
         submit: func(
             command-buffers: list<borrow<command-buffer>>,
-            wait-semaphores: list<semaphore-wait-info>,
-            signal-semaphores: list<borrow<semaphore>>,
+            waits: list<semaphore-submit-info>,
+            signals: list<semaphore-submit-info>,
             fence: option<borrow<fence>>,
         ) -> result<_, vulkan-error>;
 

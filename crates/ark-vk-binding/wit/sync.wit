@@ -1,7 +1,7 @@
 package ark:gpu@0.1.0;
 
 interface sync {
-    use core.{vulkan-error, queue-family};
+    use core.{vulkan-error, queue-family, pipeline-stage};
 
     // ── Sharing ──
 
@@ -31,14 +31,59 @@ interface sync {
     /// Reset a fence to the unsignaled state.
     reset-fence: func(fence: borrow<fence>) -> result<_, vulkan-error>;
 
-    // ── Semaphore ──
+    // ── Binary Semaphore ──
 
-    /// A low-level semaphore for GPU–GPU synchronisation.
+    /// A binary semaphore for GPU–GPU synchronisation.
     ///
-    /// Semaphores are signaled and waited on by queue submissions,
+    /// Binary semaphores are signaled and waited on by queue submissions,
     /// providing ordering guarantees between batches of work.
-    resource semaphore { }
+    resource binary-semaphore { }
 
-    /// Create a semaphore.
-    create-semaphore: func() -> result<semaphore, vulkan-error>;
+    /// Create a binary semaphore.
+    create-binary-semaphore: func() -> result<binary-semaphore, vulkan-error>;
+
+    // ── Timeline Semaphore ──
+
+    /// A timeline semaphore with monotonically-increasing 64‑bit counter.
+    ///
+    /// Timeline semaphores can be signaled and waited from **both** the
+    /// GPU (via queue submission) and the CPU (via `signal-timeline-semaphore`
+    /// and `wait-timeline-semaphore`).
+    resource timeline-semaphore { }
+
+    /// Create a timeline semaphore with the given initial counter value.
+    create-timeline-semaphore: func(initial-value: u64) -> result<timeline-semaphore, vulkan-error>;
+
+    /// Signal a timeline semaphore from the CPU side.
+    ///
+    /// The semaphore counter is advanced to `value` when all previously
+    /// submitted work that signals this semaphore has completed.
+    signal-timeline-semaphore: func(semaphore: borrow<timeline-semaphore>, value: u64) -> result<_, vulkan-error>;
+
+    /// Wait for one or more timeline semaphores from the CPU side.
+    ///
+    /// `values` specifies the counter value to wait for for each semaphore
+    /// (must have the same length as `sems`).
+    /// When `wait-all` is true, the call blocks until **all** semaphores
+    /// reach their target values.  When false, it returns as soon as **any**
+    /// semaphore reaches its target.
+    ///
+    /// `timeout` is in nanoseconds.  Use `u64::MAX` for no timeout.
+    wait-timeline-semaphore: func(
+        semaphores: list<borrow<timeline-semaphore>>,
+        values: list<u64>,
+        wait-all: bool,
+        timeout: u64,
+    ) -> result<_, vulkan-error>;
+
+    variant semaphore-info {
+        binary(binary-semaphore),
+        timeline(tuple<timeline-semaphore, u64>),
+    }
+
+    record semaphore-submit-info {
+        semaphore: semaphore-info,
+        /// `VkPipelineStageFlags2` — stage(s) that wait for / signal this semaphore.
+        stages: pipeline-stage,
+    }
 }

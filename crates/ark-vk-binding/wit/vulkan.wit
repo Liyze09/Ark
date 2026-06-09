@@ -50,6 +50,76 @@ interface core {
         compute,
         transfer,
     }
+
+    flags pipeline-stage {
+        top-of-pipe,
+        draw-indirect,
+        vertex-input,
+        vertex-shader,
+        tessellation-control-shader,
+        tessellation-evaluation-shader,
+        geometry-shader,
+        fragment-shader,
+        early-fragment-tests,
+        late-fragment-tests,
+        color-attachment-output,
+        compute-shader,
+        /// Combines VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT and TRANSFER_BIT.
+        transfer,
+        bottom-of-pipe,
+        host,
+        all-graphics,
+        all-commands,
+        copy,
+        resolve,
+        blit,
+        clear,
+        index-input,
+        vertex-attribute-input,
+        pre-rasterization-shaders,
+        /// VK_KHR_video_decode_queue
+        video-decode-khr,
+        /// VK_KHR_video_encode_queue
+        video-encode-khr,
+        /// VK_EXT_transform_feedback
+        transform-feedback-ext,
+        /// VK_EXT_conditional_rendering
+        conditional-rendering-ext,
+        /// VK_NV_device_generated_commands / VK_EXT_device_generated_commands
+        command-preprocess-ext,
+        /// VK_KHR_fragment_shading_rate / VK_NV_shading_rate_image
+        fragment-shading-rate-attachment-khr,
+        /// VK_KHR_acceleration_structure / VK_NV_ray_tracing
+        acceleration-structure-build-khr,
+        /// VK_KHR_ray_tracing_pipeline / VK_NV_ray_tracing
+        ray-tracing-shader-khr,
+        /// VK_EXT_fragment_density_map
+        fragment-density-process-ext,
+        /// VK_EXT_mesh_shader / VK_NV_mesh_shader
+        task-shader-ext,
+        /// VK_EXT_mesh_shader / VK_NV_mesh_shader
+        mesh-shader-ext,
+        /// VK_HUAWEI_subpass_shading (includes legacy SUBPASS_SHADING alias)
+        subpass-shader-huawei,
+        /// VK_HUAWEI_invocation_mask
+        invocation-mask-huawei,
+        /// VK_KHR_ray_tracing_maintenance1
+        acceleration-structure-copy-khr,
+        /// VK_EXT_opacity_micromap
+        micromap-build-ext,
+        /// VK_HUAWEI_cluster_culling_shader
+        cluster-culling-shader-huawei,
+        /// VK_NV_optical_flow
+        optical-flow-nv,
+        /// VK_NV_cooperative_vector
+        convert-cooperative-vector-matrix-nv,
+        /// VK_ARM_data_graph
+        data-graph-arm,
+        /// VK_KHR_copy_memory_indirect
+        copy-indirect-khr,
+        /// VK_EXT_memory_decompression
+        memory-decompression-ext,
+    }
 }
 
 /// The root world for GPU-accelerated WASM extensions.
