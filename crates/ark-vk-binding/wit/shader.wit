@@ -12,16 +12,16 @@ interface shader {
     }
 
     /// A compiled Vulkan shader module, created from SPIR-V binary data.
-    resource shader-module { }
+    resource shader-module {
+        /// Create a shader module from SPIR-V words.
+        ///
+        /// `code` must contain valid SPIR-V binary, one `u32` per word.
+        shader-from-bytes: static func(code: list<u32>) -> result<shader-module, vulkan-error>;
 
-    /// Create a shader module from SPIR-V words.
-    ///
-    /// `code` must contain valid SPIR-V binary, one `u32` per word.
-    shader-from-bytes: func(code: list<u32>) -> result<shader-module, vulkan-error>;
-
-    /// Load a SPIR-V shader from the extension package's virtual filesystem
-    /// and create a shader module.
-    ///
-    /// `path` is relative to the package root (e.g. `"shaders/comp.spv"`).
-    shader-from-package: func(path: string) -> result<shader-module, vulkan-error>;
+        /// Load a SPIR-V shader from the extension package's virtual filesystem
+        /// and create a shader module.
+        ///
+        /// `path` is relative to the package root (e.g. `"shaders/comp.spv"`).
+        shader-from-package: static func(path: string) -> result<shader-module, vulkan-error>;
+    }
 }

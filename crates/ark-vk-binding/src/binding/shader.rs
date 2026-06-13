@@ -1,9 +1,8 @@
 use vulkanalia::prelude::v1_0::*;
-use vulkanalia::vk;
+use vulkanalia::vk::{self, HasBuilder};
 use wasmtime::component::Resource;
 
 use crate::{
-    VkContextView,
     binding::{
         ark::gpu::{
             core::VulkanError,
@@ -11,13 +10,17 @@ use crate::{
         },
         vk_err,
     },
+    VkContextView,
 };
+
+
+impl Host for VkContextView<'_> {}
 
 pub(crate) struct GpuShaderModule {
     pub(crate) module: vk::ShaderModule,
 }
 
-impl Host for VkContextView<'_> {
+impl HostShaderModule for VkContextView<'_> {
     fn shader_from_bytes(&mut self, code: Vec<u32>) -> Result<Resource<ShaderModule>, VulkanError> {
         let info = vk::ShaderModuleCreateInfo {
             s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
@@ -37,17 +40,13 @@ impl Host for VkContextView<'_> {
 
     fn shader_from_package(&mut self, path: String) -> Result<Resource<ShaderModule>, VulkanError> {
         let Some(spirv_bytes) = self.files.get(&path) else {
-            return Err(VulkanError::Unnamed(format!(
-                "shader not found in package: {}",
-                path
-            )));
+            return Err(VulkanError::Unnamed(format!("shader not found in package: {}", path)));
         };
 
         if spirv_bytes.len() % 4 != 0 {
             return Err(VulkanError::InvalidShader);
         }
 
-        // Convert bytes to u32 words (SPIR-V is little-endian u32)
         let code: Vec<u32> = spirv_bytes
             .chunks_exact(4)
             .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
@@ -68,9 +67,7 @@ impl Host for VkContextView<'_> {
             .map_err(|_| VulkanError::OutOfHostMemory)?;
         Ok(Resource::new_own(handle.rep()))
     }
-}
 
-impl HostShaderModule for VkContextView<'_> {
     fn drop(&mut self, rep: Resource<ShaderModule>) -> wasmtime::anyhow::Result<()> {
         let key = Resource::<GpuShaderModule>::new_own(rep.rep());
         let shader = self.table.delete(key)?;

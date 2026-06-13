@@ -19,15 +19,11 @@ interface command-buffer {
     /// A command buffer being built (records commands before submission).
 
     /// A fully-built command buffer ready for submission.
-    resource command-buffer { }
-
-    /// Allocate a primary command buffer builder for the given queue family.
-    primary-command-buffer: func(queue-family: queue-family, usage: command-buffer-usage) -> own<command-buffer-builder>;
-
-    /// Finalize building and produce an executable command buffer.
-    build-command-buffer: func(cmd: own<command-buffer-builder>) -> own<command-buffer>;
-
-    // ── Copy helpers ──
+    /// A command buffer being built (records commands before submission).
+    /// A fully-built command buffer ready for submission.
+    resource command-buffer {
+        build: static func(cmd: own<command-buffer-builder>) -> own<command-buffer>;
+    }
 
     /// Describes a region for buffer-to-buffer copy.
     record buffer-copy {
@@ -194,6 +190,12 @@ interface command-buffer {
     // ── Command builder methods ──
 
     resource command-buffer-builder {
+    // ── Command buffer creation ──
+    
+    /// Allocate a primary command buffer builder for the given queue family.
+    new: static func(queue-family: queue-family, usage: command-buffer-usage) -> own<command-buffer-builder>;
+    
+    // ── Pipeline binding ──
         // ── Pipeline binding ──
 
         /// Bind a compute pipeline for subsequent dispatch commands.

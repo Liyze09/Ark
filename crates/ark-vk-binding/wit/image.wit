@@ -103,10 +103,10 @@ interface image {
     }
 
     /// A Vulkan image object with memory bound.
-    resource image { }
-
-    /// Create an image with the given parameters and memory allocation.
-    create-image: func(create-info: image-create-info, alloc: allocate-info) -> result<image, vulkan-error>;
+    resource image {
+        /// Create an image with the given parameters and memory allocation.
+        create: static func(create-info: image-create-info, alloc: allocate-info) -> result<image, vulkan-error>;
+    }
 
     // ── Image view ──
 
@@ -140,10 +140,10 @@ interface image {
     }
 
     /// An image view — describes how the GPU interprets an image's data.
-    resource image-view { }
-
-    /// Create an image view from an image.
-    create-image-view: func(create-info: image-view-create-info) -> result<image-view, vulkan-error>;
+    resource image-view {
+        /// Create an image view from an image.
+        create: static func(create-info: image-view-create-info) -> result<image-view, vulkan-error>;
+    }
 
     // ── Sampler ──
 
@@ -210,8 +210,8 @@ interface image {
     }
 
     /// A texture sampler controlling how shaders read image data.
-    resource sampler { }
-
-    /// Create a texture sampler.
-    create-sampler: func(create-info: sampler-create-info) -> result<sampler, vulkan-error>;
+    resource sampler {
+        /// Create a texture sampler.
+        create: static func(create-info: sampler-create-info) -> result<sampler, vulkan-error>;
+    }
 }

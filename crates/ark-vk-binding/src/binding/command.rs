@@ -67,6 +67,8 @@ pub(crate) struct GpuCommandBuffer {
     pub(crate) pool: vk::CommandPool,
 }
 
+impl Host for VkContextView<'_> {}
+
 // ── Helpers ──
 
 fn vk_subresource_layers(sl: &ImageSubresourceLayers) -> vk::ImageSubresourceLayers {
@@ -170,8 +172,8 @@ fn vk_image_aspect_flags(flags: ImageAspectFlags) -> vk::ImageAspectFlags {
 
 // ── Host implementations ──
 
-impl Host for VkContextView<'_> {
-    fn primary_command_buffer(
+impl HostCommandBufferBuilder for VkContextView<'_> {
+    fn new(
         &mut self,
         queue_family: QueueFamily,
         usage: CommandBufferUsage,
@@ -194,7 +196,6 @@ impl Host for VkContextView<'_> {
 
         let begin_info = vk::CommandBufferBeginInfo::builder().flags(flags);
         if let Err(e) = unsafe { self.vk_device().begin_command_buffer(cmd, &begin_info) } {
-            // Free the command buffer before panicking — otherwise it leaks.
             unsafe {
                 self.vk_device().free_command_buffers(pool, &[cmd]);
             }
@@ -205,8 +206,6 @@ impl Host for VkContextView<'_> {
         let handle = match self.table.push(builder) {
             Ok(h) => h,
             Err(e) => {
-                // Free the allocated command buffer on resource-table push
-                // failure (valid in any state per the Vulkan spec).
                 unsafe {
                     self.vk_device().free_command_buffers(pool, &[cmd]);
                 }
@@ -216,32 +215,7 @@ impl Host for VkContextView<'_> {
         Resource::new_own(handle.rep())
     }
 
-    fn build_command_buffer(
-        &mut self,
-        cmd: Resource<CommandBufferBuilder>,
-    ) -> Resource<CommandBuffer> {
-        let key = Resource::<GpuCommandBufferBuilder>::new_own(cmd.rep());
-        let builder = self
-            .table
-            .delete(key)
-            .expect("failed to delete builder from table");
-
-        unsafe { self.vk_device().end_command_buffer(builder.cmd) }
-            .expect("failed to end command buffer");
-
-        let finalized = GpuCommandBuffer {
-            cmd: builder.cmd,
-            pool: builder.pool,
-        };
-        let handle = self
-            .table
-            .push(finalized)
-            .expect("ResourceTable push failed");
-        Resource::new_own(handle.rep())
-    }
-}
-
-impl HostCommandBufferBuilder for VkContextView<'_> {
+    // ── Pipeline binding ──
     // ── Pipeline binding ──
 
     fn bind_compute_pipeline(
@@ -1139,6 +1113,30 @@ impl HostCommandBufferBuilder for VkContextView<'_> {
 }
 
 impl HostCommandBuffer for VkContextView<'_> {
+    fn build(
+        &mut self,
+        cmd: Resource<CommandBufferBuilder>,
+    ) -> Resource<CommandBuffer> {
+        let key = Resource::<GpuCommandBufferBuilder>::new_own(cmd.rep());
+        let builder = self
+            .table
+            .delete(key)
+            .expect("failed to delete builder from table");
+
+        unsafe { self.vk_device().end_command_buffer(builder.cmd) }
+            .expect("failed to end command buffer");
+
+        let finalized = GpuCommandBuffer {
+            cmd: builder.cmd,
+            pool: builder.pool,
+        };
+        let handle = self
+            .table
+            .push(finalized)
+            .expect("ResourceTable push failed");
+        Resource::new_own(handle.rep())
+    }
+
     fn drop(&mut self, rep: Resource<CommandBuffer>) -> wasmtime::anyhow::Result<()> {
         let key = Resource::<GpuCommandBuffer>::new_own(rep.rep());
         let cmd_buf = self.table.delete(key)?;

@@ -30,15 +30,10 @@ interface descriptor {
 
     /// A single binding in a descriptor set layout.
     record descriptor-binding {
-        /// Binding number (matches the `layout(binding = N)` in the shader).
         binding: u32,
-        /// The type of descriptor.
         descriptor-type: descriptor-type,
-        /// Number of descriptors in this binding (for arrays).
         descriptor-count: u32,
-        /// `VkShaderStageFlags` — which stages can access this binding.
         stage-flags: u32,
-        /// Per-binding flags (update-after-bind, partially-bound, etc.).
         binding-flags: descriptor-binding-flags,
     }
 
@@ -47,23 +42,20 @@ interface descriptor {
     /// Describes the bindings in a descriptor set.
     ///
     /// This is the `VkDescriptorSetLayout` equivalent.
-    resource descriptor-set-layout { }
-
-    /// Create a descriptor set layout from a list of bindings.
-    ///
-    /// Bindings with `variable-descriptor-count` are allocated with the
-    /// count specified here as the *maximum*; the actual count is
-    /// specified when allocating the descriptor set.
-    create-descriptor-set-layout: func(bindings: list<descriptor-binding>) -> result<descriptor-set-layout, vulkan-error>;
+    resource descriptor-set-layout {
+        /// Create a descriptor set layout from a list of bindings.
+        ///
+        /// Bindings with `variable-descriptor-count` are allocated with the
+        /// count specified here as the *maximum*; the actual count is
+        /// specified when allocating the descriptor set.
+        create: static func(bindings: list<descriptor-binding>) -> result<descriptor-set-layout, vulkan-error>;
+    }
 
     // ── Descriptor Pool ──
 
     /// Pool create flags matching `VkDescriptorPoolCreateFlags`.
     flags descriptor-pool-create-flags {
-        /// Allow descriptor sets allocated from this pool to be updated
-        /// after they are bound to a command buffer.
         update-after-bind,
-        /// Allow individual descriptor sets to be freed.
         free-descriptor-set,
     }
 
@@ -76,36 +68,19 @@ interface descriptor {
     /// Allocates descriptor sets.
     ///
     /// This is the `VkDescriptorPool` equivalent.
-    resource descriptor-pool { }
-
-    /// Create a descriptor pool.
-    ///
-    /// `max-sets` — maximum number of descriptor sets that can be allocated.
-    /// `pool-sizes` — maximum number of descriptors of each type.
-    create-descriptor-pool: func(
-        max-sets: u32,
-        pool-sizes: list<pool-size>,
-        create-flags: descriptor-pool-create-flags,
-    ) -> result<descriptor-pool, vulkan-error>;
+    resource descriptor-pool {
+        /// Create a descriptor pool.
+        ///
+        /// `max-sets` — maximum number of descriptor sets that can be allocated.
+        /// `pool-sizes` — maximum number of descriptors of each type.
+        create: static func(
+            max-sets: u32,
+            pool-sizes: list<pool-size>,
+            create-flags: descriptor-pool-create-flags,
+        ) -> result<descriptor-pool, vulkan-error>;
+    }
 
     // ── Descriptor Set ──
-
-    /// An allocated descriptor set with concrete descriptor bindings.
-    resource descriptor-set { }
-
-    /// Allocate one descriptor set from a pool with a given layout.
-    ///
-    /// `variable-descriptor-counts` specifies the actual descriptor count
-    /// for each binding that has `variable-descriptor-count` in the layout,
-    /// in binding-number order.  Must be empty if no variable-count bindings
-    /// exist.
-    allocate-descriptor-set: func(
-        pool: borrow<descriptor-pool>,
-        layout: borrow<descriptor-set-layout>,
-        variable-descriptor-counts: list<u32>,
-    ) -> result<descriptor-set, vulkan-error>;
-
-    // ── Descriptor Write ──
 
     /// Describes a buffer to be written into a descriptor.
     record buffer-descriptor-info {
@@ -117,33 +92,33 @@ interface descriptor {
     /// Describes an image to be written into a descriptor.
     record image-descriptor-info {
         image-view: borrow<image-view>,
-        /// `VkImageLayout`.
         image-layout: u32,
         sampler: option<borrow<sampler>>,
     }
 
     /// A single descriptor write targeting a binding within a set.
     record descriptor-write {
-        /// Binding number within the set.
         binding: u32,
-        /// First array element to update.
         dst-array-element: u32,
-        /// Number of descriptors to update.
         descriptor-count: u32,
-        /// The type must match the layout binding's type.
         descriptor-type: descriptor-type,
-        /// Buffer descriptor (for buffer types).
         buffer-info: option<buffer-descriptor-info>,
-        /// Image descriptor (for image/sampler types).
         image-info: option<image-descriptor-info>,
     }
 
-    /// Write descriptors into a set.
-    ///
-    /// All writes in one call are batched into a single
-    /// `vkUpdateDescriptorSets` call.
-    write-descriptor-set: func(
-        set: borrow<descriptor-set>,
-        writes: list<descriptor-write>,
-    ) -> result<_, vulkan-error>;
+    /// An allocated descriptor set with concrete descriptor bindings.
+    resource descriptor-set {
+        /// Allocate one descriptor set from a pool with a given layout.
+        allocate: static func(
+            pool: borrow<descriptor-pool>,
+            layout: borrow<descriptor-set-layout>,
+            variable-descriptor-counts: list<u32>,
+        ) -> result<descriptor-set, vulkan-error>;
+
+        /// Write descriptors into a set.
+        ///
+        /// All writes in one call are batched into a single
+        /// `vkUpdateDescriptorSets` call.
+        write: func(writes: list<descriptor-write>) -> result<_, vulkan-error>;
+    }
 }

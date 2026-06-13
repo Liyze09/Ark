@@ -9,8 +9,8 @@ use crate::{
         ark::gpu::{
             core::VulkanError,
             image::{
-                BorderColor, CompareOp, Filter, Host, HostImage, HostImageView, HostSampler, Image,
-                ImageAspectFlags, ImageCreateFlags, ImageCreateInfo, ImageTiling, ImageType,
+                BorderColor, CompareOp, Filter, Host, HostImage, HostImageView, HostSampler,
+                Image, ImageAspectFlags, ImageCreateFlags, ImageCreateInfo, ImageTiling, ImageType,
                 ImageUsage, ImageView, ImageViewCreateInfo, ImageViewType, SampleCount, Sampler,
                 SamplerAddressMode, SamplerCreateInfo, SamplerMipmapMode,
             },
@@ -20,6 +20,8 @@ use crate::{
         vk_err,
     },
 };
+
+impl Host for VkContextView<'_> {}
 
 pub(crate) struct GpuImage {
     pub(crate) image: vk::Image,
@@ -34,14 +36,10 @@ pub(crate) struct GpuSampler {
     pub(crate) sampler: vk::Sampler,
 }
 
-// ── Type conversions ──
-
 fn vk_image_type(ty: ImageType) -> vk::ImageType {
     match ty {
         ImageType::Dim1d | ImageType::Dim1Array => vk::ImageType::_1D,
-        ImageType::Dim2d | ImageType::Dim2dArray | ImageType::Cube | ImageType::CubeArray => {
-            vk::ImageType::_2D
-        }
+        ImageType::Dim2d | ImageType::Dim2dArray | ImageType::Cube | ImageType::CubeArray => vk::ImageType::_2D,
         ImageType::Dim3d => vk::ImageType::_3D,
     }
 }
@@ -60,60 +58,28 @@ fn vk_image_view_type(ty: ImageViewType) -> vk::ImageViewType {
 
 fn vk_image_usage(usage: ImageUsage) -> vk::ImageUsageFlags {
     let mut flags = vk::ImageUsageFlags::empty();
-    if usage.contains(ImageUsage::TRANSFER_SRC) {
-        flags |= vk::ImageUsageFlags::TRANSFER_SRC;
-    }
-    if usage.contains(ImageUsage::TRANSFER_DST) {
-        flags |= vk::ImageUsageFlags::TRANSFER_DST;
-    }
-    if usage.contains(ImageUsage::SAMPLED) {
-        flags |= vk::ImageUsageFlags::SAMPLED;
-    }
-    if usage.contains(ImageUsage::STORAGE) {
-        flags |= vk::ImageUsageFlags::STORAGE;
-    }
-    if usage.contains(ImageUsage::COLOR_ATTACHMENT) {
-        flags |= vk::ImageUsageFlags::COLOR_ATTACHMENT;
-    }
-    if usage.contains(ImageUsage::DEPTH_STENCIL_ATTACHMENT) {
-        flags |= vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;
-    }
-    if usage.contains(ImageUsage::TRANSIENT_ATTACHMENT) {
-        flags |= vk::ImageUsageFlags::TRANSIENT_ATTACHMENT;
-    }
-    if usage.contains(ImageUsage::INPUT_ATTACHMENT) {
-        flags |= vk::ImageUsageFlags::INPUT_ATTACHMENT;
-    }
-    if usage.contains(ImageUsage::SHADING_RATE_ATTACHMENT) {
-        flags |= vk::ImageUsageFlags::FRAGMENT_SHADING_RATE_ATTACHMENT_KHR;
-    }
-    if usage.contains(ImageUsage::DENSITY_MAP_ATTACHMENT) {
-        flags |= vk::ImageUsageFlags::FRAGMENT_DENSITY_MAP_EXT;
-    }
+    if usage.contains(ImageUsage::TRANSFER_SRC) { flags |= vk::ImageUsageFlags::TRANSFER_SRC; }
+    if usage.contains(ImageUsage::TRANSFER_DST) { flags |= vk::ImageUsageFlags::TRANSFER_DST; }
+    if usage.contains(ImageUsage::SAMPLED) { flags |= vk::ImageUsageFlags::SAMPLED; }
+    if usage.contains(ImageUsage::STORAGE) { flags |= vk::ImageUsageFlags::STORAGE; }
+    if usage.contains(ImageUsage::COLOR_ATTACHMENT) { flags |= vk::ImageUsageFlags::COLOR_ATTACHMENT; }
+    if usage.contains(ImageUsage::DEPTH_STENCIL_ATTACHMENT) { flags |= vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT; }
+    if usage.contains(ImageUsage::TRANSIENT_ATTACHMENT) { flags |= vk::ImageUsageFlags::TRANSIENT_ATTACHMENT; }
+    if usage.contains(ImageUsage::INPUT_ATTACHMENT) { flags |= vk::ImageUsageFlags::INPUT_ATTACHMENT; }
+    if usage.contains(ImageUsage::SHADING_RATE_ATTACHMENT) { flags |= vk::ImageUsageFlags::FRAGMENT_SHADING_RATE_ATTACHMENT_KHR; }
+    if usage.contains(ImageUsage::DENSITY_MAP_ATTACHMENT) { flags |= vk::ImageUsageFlags::FRAGMENT_DENSITY_MAP_EXT; }
     flags
 }
 
 fn vk_image_create_flags(flags: ImageCreateFlags) -> vk::ImageCreateFlags {
-    let mut vk_flags = vk::ImageCreateFlags::empty();
-    if flags.contains(ImageCreateFlags::MUTABLE_FORMAT) {
-        vk_flags |= vk::ImageCreateFlags::MUTABLE_FORMAT;
-    }
-    if flags.contains(ImageCreateFlags::CUBE_COMPATIBLE) {
-        vk_flags |= vk::ImageCreateFlags::CUBE_COMPATIBLE;
-    }
-    if flags.contains(ImageCreateFlags::ALIAS) {
-        vk_flags |= vk::ImageCreateFlags::ALIAS;
-    }
-    if flags.contains(ImageCreateFlags::BLOCK_TEXEL_VIEW_COMPATIBLE) {
-        vk_flags |= vk::ImageCreateFlags::BLOCK_TEXEL_VIEW_COMPATIBLE;
-    }
-    if flags.contains(ImageCreateFlags::EXTENDED_USAGE) {
-        vk_flags |= vk::ImageCreateFlags::EXTENDED_USAGE;
-    }
-    if flags.contains(ImageCreateFlags::CORNER_SAMPLED) {
-        vk_flags |= vk::ImageCreateFlags::CORNER_SAMPLED_NV;
-    }
-    vk_flags
+    let mut vkf = vk::ImageCreateFlags::empty();
+    if flags.contains(ImageCreateFlags::MUTABLE_FORMAT) { vkf |= vk::ImageCreateFlags::MUTABLE_FORMAT; }
+    if flags.contains(ImageCreateFlags::CUBE_COMPATIBLE) { vkf |= vk::ImageCreateFlags::CUBE_COMPATIBLE; }
+    if flags.contains(ImageCreateFlags::ALIAS) { vkf |= vk::ImageCreateFlags::ALIAS; }
+    if flags.contains(ImageCreateFlags::BLOCK_TEXEL_VIEW_COMPATIBLE) { vkf |= vk::ImageCreateFlags::BLOCK_TEXEL_VIEW_COMPATIBLE; }
+    if flags.contains(ImageCreateFlags::EXTENDED_USAGE) { vkf |= vk::ImageCreateFlags::EXTENDED_USAGE; }
+    if flags.contains(ImageCreateFlags::CORNER_SAMPLED) { vkf |= vk::ImageCreateFlags::CORNER_SAMPLED_NV; }
+    vkf
 }
 
 fn vk_sample_count(samples: SampleCount) -> vk::SampleCountFlags {
@@ -183,36 +149,10 @@ fn vk_border_color(color: BorderColor) -> vk::BorderColor {
     }
 }
 
-fn vk_image_aspect_flags(flags: ImageAspectFlags) -> vk::ImageAspectFlags {
-    let mut vkf = vk::ImageAspectFlags::empty();
-    if flags.contains(ImageAspectFlags::COLOR) {
-        vkf |= vk::ImageAspectFlags::COLOR;
-    }
-    if flags.contains(ImageAspectFlags::DEPTH) {
-        vkf |= vk::ImageAspectFlags::DEPTH;
-    }
-    if flags.contains(ImageAspectFlags::STENCIL) {
-        vkf |= vk::ImageAspectFlags::STENCIL;
-    }
-    if flags.contains(ImageAspectFlags::METADATA) {
-        vkf |= vk::ImageAspectFlags::METADATA;
-    }
-    if flags.contains(ImageAspectFlags::PLANE0) {
-        vkf |= vk::ImageAspectFlags::PLANE_0;
-    }
-    if flags.contains(ImageAspectFlags::PLANE1) {
-        vkf |= vk::ImageAspectFlags::PLANE_1;
-    }
-    if flags.contains(ImageAspectFlags::PLANE2) {
-        vkf |= vk::ImageAspectFlags::PLANE_2;
-    }
-    vkf
-}
+// ── HostImage ──
 
-// ── Host implementations ──
-
-impl Host for VkContextView<'_> {
-    fn create_image(
+impl HostImage for VkContextView<'_> {
+    fn create(
         &mut self,
         create_info: ImageCreateInfo,
         alloc: AllocateInfo,
@@ -237,34 +177,39 @@ impl Host for VkContextView<'_> {
             .initial_layout(vk::ImageLayout::UNDEFINED);
 
         let alloc_options = vma_alloc_options(&alloc, false);
+        let (image, allocation) = unsafe { self.vma().create_image(image_info, &alloc_options) }
+            .map_err(vk_err)?;
 
-        let (image, allocation) =
-            unsafe { self.vma().create_image(image_info, &alloc_options) }.map_err(vk_err)?;
-
-        let handle = self
-            .table
-            .push(GpuImage { image, allocation })
+        let handle = self.table.push(GpuImage { image, allocation })
             .map_err(|_| VulkanError::OutOfHostMemory)?;
         Ok(Resource::new_own(handle.rep()))
     }
 
-    fn create_image_view(
+    fn drop(&mut self, rep: Resource<Image>) -> wasmtime::anyhow::Result<()> {
+        let key = Resource::<GpuImage>::new_own(rep.rep());
+        let img = self.table.delete(key)?;
+        unsafe { self.vma().destroy_image(img.image, img.allocation); }
+        Ok(())
+    }
+}
+
+// ── HostImageView ──
+
+impl HostImageView for VkContextView<'_> {
+    fn create(
         &mut self,
         create_info: ImageViewCreateInfo,
     ) -> Result<Resource<ImageView>, VulkanError> {
         let image_key = Resource::<GpuImage>::new_borrow(create_info.image.rep());
-        let gpu_image = self
-            .table
-            .get(&image_key)
-            .map_err(|_| VulkanError::Unknown)?;
+        let gpu_image = self.table.get(&image_key).map_err(|_| VulkanError::Unknown)?;
 
-        let subresource = &create_info.subresource_range;
+        let sr = &create_info.subresource_range;
         let subresource_range = vk::ImageSubresourceRange::builder()
-            .aspect_mask(vk_image_aspect_flags(subresource.aspect_mask))
-            .base_mip_level(subresource.base_mip_level)
-            .level_count(subresource.level_count)
-            .base_array_layer(subresource.base_array_layer)
-            .layer_count(subresource.layer_count)
+            .aspect_mask(vk_image_aspect_flags(sr.aspect_mask))
+            .base_mip_level(sr.base_mip_level)
+            .level_count(sr.level_count)
+            .base_array_layer(sr.base_array_layer)
+            .layer_count(sr.layer_count)
             .build();
 
         let mut view_info = vk::ImageViewCreateInfo::builder()
@@ -283,17 +228,24 @@ impl Host for VkContextView<'_> {
             view_info = view_info.components(components);
         }
 
-        let view =
-            unsafe { self.vk_device().create_image_view(&view_info, None) }.map_err(vk_err)?;
-
-        let handle = self
-            .table
-            .push(GpuImageView { view })
+        let view = unsafe { self.vk_device().create_image_view(&view_info, None) }.map_err(vk_err)?;
+        let handle = self.table.push(GpuImageView { view })
             .map_err(|_| VulkanError::OutOfHostMemory)?;
         Ok(Resource::new_own(handle.rep()))
     }
 
-    fn create_sampler(
+    fn drop(&mut self, rep: Resource<ImageView>) -> wasmtime::anyhow::Result<()> {
+        let key = Resource::<GpuImageView>::new_own(rep.rep());
+        let view = self.table.delete(key)?;
+        unsafe { self.vk_device().destroy_image_view(view.view, None); }
+        Ok(())
+    }
+}
+
+// ── HostSampler ──
+
+impl HostSampler for VkContextView<'_> {
+    fn create(
         &mut self,
         create_info: SamplerCreateInfo,
     ) -> Result<Resource<Sampler>, VulkanError> {
@@ -314,46 +266,28 @@ impl Host for VkContextView<'_> {
             .border_color(vk_border_color(create_info.border_color))
             .unnormalized_coordinates(create_info.unnormalized_coordinates);
 
-        let sampler =
-            unsafe { self.vk_device().create_sampler(&sampler_info, None) }.map_err(vk_err)?;
-
-        let handle = self
-            .table
-            .push(GpuSampler { sampler })
+        let sampler = unsafe { self.vk_device().create_sampler(&sampler_info, None) }.map_err(vk_err)?;
+        let handle = self.table.push(GpuSampler { sampler })
             .map_err(|_| VulkanError::OutOfHostMemory)?;
         Ok(Resource::new_own(handle.rep()))
     }
-}
 
-impl HostImage for VkContextView<'_> {
-    fn drop(&mut self, rep: Resource<Image>) -> wasmtime::anyhow::Result<()> {
-        let key = Resource::<GpuImage>::new_own(rep.rep());
-        let img = self.table.delete(key)?;
-        unsafe {
-            self.vma().destroy_image(img.image, img.allocation);
-        }
-        Ok(())
-    }
-}
-
-impl HostImageView for VkContextView<'_> {
-    fn drop(&mut self, rep: Resource<ImageView>) -> wasmtime::anyhow::Result<()> {
-        let key = Resource::<GpuImageView>::new_own(rep.rep());
-        let view = self.table.delete(key)?;
-        unsafe {
-            self.vk_device().destroy_image_view(view.view, None);
-        }
-        Ok(())
-    }
-}
-
-impl HostSampler for VkContextView<'_> {
     fn drop(&mut self, rep: Resource<Sampler>) -> wasmtime::anyhow::Result<()> {
         let key = Resource::<GpuSampler>::new_own(rep.rep());
         let sampler = self.table.delete(key)?;
-        unsafe {
-            self.vk_device().destroy_sampler(sampler.sampler, None);
-        }
+        unsafe { self.vk_device().destroy_sampler(sampler.sampler, None); }
         Ok(())
     }
+}
+
+fn vk_image_aspect_flags(flags: ImageAspectFlags) -> vk::ImageAspectFlags {
+    let mut vkf = vk::ImageAspectFlags::empty();
+    if flags.contains(ImageAspectFlags::COLOR) { vkf |= vk::ImageAspectFlags::COLOR; }
+    if flags.contains(ImageAspectFlags::DEPTH) { vkf |= vk::ImageAspectFlags::DEPTH; }
+    if flags.contains(ImageAspectFlags::STENCIL) { vkf |= vk::ImageAspectFlags::STENCIL; }
+    if flags.contains(ImageAspectFlags::METADATA) { vkf |= vk::ImageAspectFlags::METADATA; }
+    if flags.contains(ImageAspectFlags::PLANE0) { vkf |= vk::ImageAspectFlags::PLANE_0; }
+    if flags.contains(ImageAspectFlags::PLANE1) { vkf |= vk::ImageAspectFlags::PLANE_1; }
+    if flags.contains(ImageAspectFlags::PLANE2) { vkf |= vk::ImageAspectFlags::PLANE_2; }
+    vkf
 }

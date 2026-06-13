@@ -114,8 +114,8 @@ fn vk_buffer_usage(usage: BufferUsage) -> vk::BufferUsageFlags {
     flags
 }
 
-impl ark::gpu::buffer::Host for VkContextView<'_> {
-    fn buffer_from_data(
+impl ark::gpu::buffer::HostBuffer for VkContextView<'_> {
+    fn from_data(
         &mut self,
         create_info: BufferCreateInfo,
         allocate_info: AllocateInfo,
@@ -157,7 +157,7 @@ impl ark::gpu::buffer::Host for VkContextView<'_> {
         Ok(Resource::<Buffer>::new_own(handle.rep()))
     }
 
-    fn buffer_zeroed(
+    fn zeroed(
         &mut self,
         create_info: BufferCreateInfo,
         allocate_info: AllocateInfo,
@@ -188,9 +188,7 @@ impl ark::gpu::buffer::Host for VkContextView<'_> {
 
         Ok(Resource::<Buffer>::new_own(handle.rep()))
     }
-}
 
-impl ark::gpu::buffer::HostBuffer for VkContextView<'_> {
     fn read(
         &mut self,
         self_: Resource<Buffer>,
@@ -296,6 +294,8 @@ impl ark::gpu::buffer::HostBuffer for VkContextView<'_> {
         Ok(())
     }
 }
+
+impl ark::gpu::buffer::Host for VkContextView<'_> {}
 
 // ── BufferAccessor ──────────────────────────────────────────────────────
 

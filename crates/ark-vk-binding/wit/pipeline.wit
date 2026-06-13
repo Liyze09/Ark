@@ -21,32 +21,39 @@ interface pipeline {
     }
 
     /// Layout combining descriptor set layouts and push constant ranges.
-    resource pipeline-layout { }
-
-    /// Create a pipeline layout.
-    ///
-    /// `descriptor-sets` maps descriptor set layouts to shader set numbers.
-    /// `push-constant-ranges` describes the push constant memory layout.
-    create-pipeline-layout: func(
-        descriptor-sets: list<descriptor-set-info>,
-        push-constant-ranges: list<push-constant-range>,
-    ) -> result<pipeline-layout, vulkan-error>;
+    resource pipeline-layout {
+        /// Create a pipeline layout.
+        ///
+        /// `descriptor-sets` maps descriptor set layouts to shader set numbers.
+        /// `push-constant-ranges` describes the push constant memory layout.
+        create: static func(
+            descriptor-sets: list<descriptor-set-info>,
+            push-constant-ranges: list<push-constant-range>,
+        ) -> result<pipeline-layout, vulkan-error>;
+    }
 
     /// A compiled compute pipeline, ready for dispatch.
-    resource compute-pipeline { }
-
-    /// Create a compute pipeline from a shader module and pipeline layout.
-    ///
-    /// `entry-point` is the name of the compute shader entry function
-    /// (e.g. `"main"`).
-    create-compute-pipeline: func(
-        layout: borrow<pipeline-layout>,
-        shader: borrow<shader-module>,
-        entry-point: string,
-    ) -> result<compute-pipeline, vulkan-error>;
+    resource compute-pipeline {
+        /// Create a compute pipeline from a shader module and pipeline layout.
+        ///
+        /// `entry-point` is the name of the compute shader entry function
+        /// (e.g. `"main"`).
+        create: static func(
+            layout: borrow<pipeline-layout>,
+            shader: borrow<shader-module>,
+            entry-point: string,
+        ) -> result<compute-pipeline, vulkan-error>;
+    }
 
     /// A compiled graphics pipeline, ready for drawing.
-    resource graphics-pipeline { }
+    resource graphics-pipeline {
+        /// Create a graphics pipeline.
+        ///
+        /// Uses reasonable defaults for rasterisation (fill, no cull),
+        /// multisampling (1×), colour blending (write all channels, no
+        /// blend), and dynamic state (viewport + scissor).
+        create: static func(info: graphics-pipeline-create-info) -> result<graphics-pipeline, vulkan-error>;
+    }
 
     /// Primitive topology for the input assembly stage.
     enum primitive-topology {
@@ -93,12 +100,7 @@ interface pipeline {
         dynamic-rendering: bool,
     }
 
-    /// Create a graphics pipeline.
-    ///
-    /// Uses reasonable defaults for rasterisation (fill, no cull),
-    /// multisampling (1×), colour blending (write all channels, no
-    /// blend), and dynamic state (viewport + scissor).
-    create-graphics-pipeline: func(info: graphics-pipeline-create-info) -> result<graphics-pipeline, vulkan-error>;
+
 
     /// A ray-tracing pipeline, for ray generation, miss, hit, and callable shaders.
     resource ray-tracing-pipeline { }

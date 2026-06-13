@@ -11,10 +11,11 @@ use wasmtime::component::Resource;
 use wasmtime_wasi::ResourceTable;
 
 use ark_vk_binding::binding::ark::gpu::{
-    buffer::Host as BufHost, buffer::HostBuffer as BufResource, command_buffer::Host as CmdHost,
-    command_buffer::HostCommandBufferBuilder as CmdBuilder, descriptor::Host as DescHost,
-    pipeline::Host as PipeHost, queue::Host as QueueHost, queue::HostQueue,
-    shader::Host as ShaderHost,
+    buffer::{BufferCreateInfo, BufferUsage, HostBuffer}, command_buffer::{BufferImageCopy, CommandBufferUsage, HostCommandBuffer as CmdBuildT, HostCommandBufferBuilder as CmdBuilder, ImageAspectFlags, ImageBarrier, ImageSubresourceLayers, ImageSubresourceRange, MemoryBarrier, Offset3d, PipelineBindPoint, Rect2d, RenderingColorAttachment, RenderingDepthStencilAttachment, Viewport}, core::QueueFamily, descriptor::{BufferDescriptorInfo, DescriptorBinding, DescriptorBindingFlags, DescriptorPoolCreateFlags, DescriptorType, DescriptorWrite, HostDescriptorPool as PoolHost, HostDescriptorSet as SetHost, HostDescriptorSetLayout as DslHost, PoolSize}, image::{
+        Extent3d, HostImage as ImageHost, HostImageView as ViewHost, ImageCreateFlags, ImageCreateInfo, ImageTiling, ImageType, ImageUsage, ImageViewCreateInfo, ImageViewType, SampleCount
+    }, memory::{AllocateInfo, MemoryType}, pipeline::{
+        DescriptorSetInfo, GraphicsPipelineCreateInfo, HostComputePipeline as ComputeHost, HostGraphicsPipeline as GraphicsHost, HostPipelineLayout as LayoutHost, PrimitiveTopology
+    }, queue::{Host as QueueGetter, HostQueue}, shader::HostShaderModule
 };
 use ark_vk_binding::{VkContextOwned, VkContextView};
 
@@ -68,7 +69,9 @@ impl VkTestCtx {
             .descriptor_binding_partially_bound(true)
             .runtime_descriptor_array(true)
             .buffer_device_address(true);
-        let mut vk13 = vk::PhysicalDeviceVulkan13Features::builder().dynamic_rendering(true);
+        let mut vk13 = vk::PhysicalDeviceVulkan13Features::builder()
+            .dynamic_rendering(true)
+            .synchronization2(true);
 
         let queue_priorities = [1.0f32];
         let mut unique_qfs = vec![graphics_qf, compute_qf, transfer_qf];
@@ -190,13 +193,9 @@ fn pick_physical_device(
 // ── Helper: build a compute pipeline with one storage buffer binding ──
 
 struct ComputePipelineSet {
-    pl: wasmtime::component::Resource<ark_vk_binding::binding::ark::gpu::pipeline::PipelineLayout>,
-    cp: wasmtime::component::Resource<ark_vk_binding::binding::ark::gpu::pipeline::ComputePipeline>,
-    dsl: wasmtime::component::Resource<
-        ark_vk_binding::binding::ark::gpu::descriptor::DescriptorSetLayout,
-    >,
-    set:
-        wasmtime::component::Resource<ark_vk_binding::binding::ark::gpu::descriptor::DescriptorSet>,
+    pl: Resource<ark_vk_binding::binding::ark::gpu::pipeline::PipelineLayout>,
+    cp: Resource<ark_vk_binding::binding::ark::gpu::pipeline::ComputePipeline>,
+    set: Resource<ark_vk_binding::binding::ark::gpu::descriptor::DescriptorSet>,
 }
 
 fn build_compute_pipeline(
@@ -204,15 +203,6 @@ fn build_compute_pipeline(
     spirv: &[u32],
     entry: &str,
 ) -> ComputePipelineSet {
-    use ark_vk_binding::binding::ark::gpu::{
-        descriptor::{
-            DescriptorBinding, DescriptorBindingFlags, DescriptorPoolCreateFlags, DescriptorType,
-            PoolSize,
-        },
-        pipeline::DescriptorSetInfo,
-    };
-    use wasmtime::component::Resource;
-
     let shader = v.shader_from_bytes(spirv.to_vec()).expect("create shader");
 
     let bindings = vec![DescriptorBinding {
@@ -222,11 +212,9 @@ fn build_compute_pipeline(
         stage_flags: vk::ShaderStageFlags::COMPUTE.bits(),
         binding_flags: DescriptorBindingFlags::empty(),
     }];
-    let dsl = v.create_descriptor_set_layout(bindings).expect("dsl");
+    let dsl = DslHost::create(v, bindings).expect("dsl");
 
-    let pool = v
-        .create_descriptor_pool(
-            1,
+    let pool = PoolHost::create(v, 1,
             vec![PoolSize {
                 descriptor_type: DescriptorType::StorageBuffer,
                 descriptor_count: 1,
@@ -236,15 +224,12 @@ fn build_compute_pipeline(
         .expect("pool");
     // Borrow dsl for allocation and layout creation
     let dsl_alloc = Resource::new_borrow(dsl.rep());
-    let set = v
-        .allocate_descriptor_set(pool, dsl_alloc, vec![])
+    let set = SetHost::allocate(v, pool, dsl_alloc, vec![])
         .expect("allocate set");
 
     // Borrow dsl for pipeline layout
     let dsl_layout = Resource::new_borrow(dsl.rep());
-    let pl = v
-        .create_pipeline_layout(
-            vec![DescriptorSetInfo {
+    let pl = LayoutHost::create(v, vec![DescriptorSetInfo {
                 layout: dsl_layout,
                 set: 0,
             }],
@@ -255,11 +240,10 @@ fn build_compute_pipeline(
     // Borrow pl and shader for pipeline creation
     let pl_cp = Resource::new_borrow(pl.rep());
     let shader_cp = Resource::new_borrow(shader.rep());
-    let cp = v
-        .create_compute_pipeline(pl_cp, shader_cp, entry.into())
+    let cp = ComputeHost::create(v, pl_cp, shader_cp, entry.into())
         .expect("compute pipeline");
 
-    ComputePipelineSet { pl, cp, dsl, set }
+    ComputePipelineSet { pl, cp, set }
 }
 
 // ── Test 1: compute shader f32 buffer add ─────────────────────────────
@@ -288,10 +272,6 @@ fn compute_add_f32() {
 
     // Input buffer
     let data_in: Vec<f32> = (0..N).map(|i| i as f32).collect();
-    use ark_vk_binding::binding::ark::gpu::{
-        buffer::{BufferCreateInfo, BufferUsage},
-        memory::{AllocateInfo, MemoryType},
-    };
 
     let create_info = BufferCreateInfo {
         size: N * 4,
@@ -305,17 +285,13 @@ fn compute_add_f32() {
         unsafe { std::slice::from_raw_parts(data_in.as_ptr() as *const u8, (N as usize) * 4) }
             .to_vec();
     let buf = v
-        .buffer_from_data(create_info, alloc, data_bytes)
+        .from_data(create_info, alloc, data_bytes)
         .expect("create buffer");
 
     let cps = build_compute_pipeline(v, &spirv, "main");
 
     // Write descriptor
-    use ark_vk_binding::binding::ark::gpu::descriptor::{
-        BufferDescriptorInfo, DescriptorType, DescriptorWrite,
-    };
-    use wasmtime::component::Resource;
-    v.write_descriptor_set(
+    SetHost::write(v, 
         Resource::new_borrow(cps.set.rep()),
         vec![DescriptorWrite {
             binding: 0,
@@ -332,13 +308,10 @@ fn compute_add_f32() {
     )
     .expect("write descriptor");
 
-    use ark_vk_binding::binding::ark::gpu::{
-        command_buffer::{CommandBufferUsage, PipelineBindPoint},
-        core::QueueFamily,
-    };
+
 
     // Record
-    let builder = v.primary_command_buffer(QueueFamily::Compute, CommandBufferUsage::OneTimeSubmit);
+    let builder = CmdBuilder::new(v, QueueFamily::Compute, CommandBufferUsage::OneTimeSubmit);
     v.bind_compute_pipeline(
         Resource::new_borrow(builder.rep()),
         Resource::new_borrow(cps.cp.rep()),
@@ -360,7 +333,7 @@ fn compute_add_f32() {
     )
     .expect("dispatch");
 
-    let cb = v.build_command_buffer(builder);
+    let cb = CmdBuildT::build(v, builder);
     let q = v.compute();
     v.submit(
         Resource::new_borrow(q.rep()),
@@ -378,14 +351,14 @@ fn compute_add_f32() {
     let result_f32: &[f32] =
         unsafe { std::slice::from_raw_parts(result_bytes.as_ptr() as *const f32, N as usize) };
 
-    for i in 0..N as usize {
+    for (i, val) in result_f32.iter().enumerate().take(N as usize) {
         let expected = i as f32 + 1.0;
         assert!(
-            (result_f32[i] - expected).abs() < 0.005,
-            "[{i}] expected {expected}, got {}",
-            result_f32[i]
+            (val - expected).abs() < 0.005,
+            "[{i}] expected {expected}, got {val}"
         );
     }
+
     println!(
         "✓ compute_add_f32: {N} elements OK (first={:.1}, last={:.1})",
         result_f32[0],
@@ -441,11 +414,6 @@ fn render_triangle_to_png() {
         shaderc::ShaderKind::Compute,
     );
 
-    use ark_vk_binding::binding::ark::gpu::{
-        buffer::{BufferCreateInfo, BufferUsage},
-        memory::{AllocateInfo, MemoryType},
-    };
-
     let img_size: u64 = (W * H * 4) as u64;
     let create_info = BufferCreateInfo {
         size: img_size,
@@ -457,16 +425,12 @@ fn render_triangle_to_png() {
     };
     // buffer_from_data forces HOST_VISIBLE memory; buffer_zeroed does not.
     let out_buf = v
-        .buffer_from_data(create_info, alloc, vec![0u8; img_size as usize])
+        .from_data(create_info, alloc, vec![0u8; img_size as usize])
         .expect("create output buffer");
 
     let cps = build_compute_pipeline(v, &spirv, "main");
 
-    use ark_vk_binding::binding::ark::gpu::descriptor::{
-        BufferDescriptorInfo, DescriptorType, DescriptorWrite,
-    };
-    use wasmtime::component::Resource;
-    v.write_descriptor_set(
+    SetHost::write(v, 
         Resource::new_borrow(cps.set.rep()),
         vec![DescriptorWrite {
             binding: 0,
@@ -483,12 +447,7 @@ fn render_triangle_to_png() {
     )
     .expect("write descriptor");
 
-    use ark_vk_binding::binding::ark::gpu::{
-        command_buffer::{CommandBufferUsage, PipelineBindPoint},
-        core::QueueFamily,
-    };
-
-    let builder = v.primary_command_buffer(QueueFamily::Compute, CommandBufferUsage::OneTimeSubmit);
+    let builder = CmdBuilder::new(v, QueueFamily::Compute, CommandBufferUsage::OneTimeSubmit);
     v.bind_compute_pipeline(
         Resource::new_borrow(builder.rep()),
         Resource::new_borrow(cps.cp.rep()),
@@ -510,7 +469,7 @@ fn render_triangle_to_png() {
     )
     .expect("dispatch");
 
-    let cb = v.build_command_buffer(builder);
+    let cb = CmdBuildT::build(v, builder);
     let q = v.compute();
     v.submit(
         Resource::new_borrow(q.rep()),
@@ -586,13 +545,8 @@ fn graphics_pipeline_triangle() {
     let frag_mod = v.shader_from_bytes(frag_spirv).expect("frag shader module");
 
     // Empty pipeline layout (no descriptors, no push constants)
-    let pl = v
-        .create_pipeline_layout(vec![], vec![])
+    let pl = LayoutHost::create(v, vec![], vec![])
         .expect("pipeline layout");
-
-    use ark_vk_binding::binding::ark::gpu::pipeline::{
-        GraphicsPipelineCreateInfo, PrimitiveTopology,
-    };
 
     let gp_info = GraphicsPipelineCreateInfo {
         layout: Resource::new_borrow(pl.rep()),
@@ -605,20 +559,10 @@ fn graphics_pipeline_triangle() {
         color_format: vk::Format::R8G8B8A8_UNORM.as_raw() as u32,
         dynamic_rendering: true,
     };
-    let gp = v
-        .create_graphics_pipeline(gp_info)
+    let gp = GraphicsHost::create(v, gp_info)
         .expect("graphics pipeline");
 
     // ── Render target image ────────────────────────────────────────
-
-    use ark_vk_binding::binding::ark::gpu::{
-        buffer::{BufferCreateInfo, BufferUsage, Host as BufHost},
-        image::{
-            Extent3d, Host as ImageHost, ImageCreateFlags, ImageCreateInfo, ImageTiling, ImageType,
-            ImageUsage, ImageViewCreateInfo, ImageViewType, SampleCount,
-        },
-        memory::{AllocateInfo, MemoryType},
-    };
 
     let img_create = ImageCreateInfo {
         image_type: ImageType::Dim2d,
@@ -638,7 +582,7 @@ fn graphics_pipeline_triangle() {
     let img_alloc = AllocateInfo {
         memory_type: MemoryType::PREFER_DEVICE,
     };
-    let img = v.create_image(img_create, img_alloc).expect("create image");
+    let img = ImageHost::create(v, img_create, img_alloc).expect("create image");
 
     let view_create = ImageViewCreateInfo {
         image: Resource::new_borrow(img.rep()),
@@ -653,7 +597,7 @@ fn graphics_pipeline_triangle() {
         },
         swizzle: None,
     };
-    let view = v.create_image_view(view_create).expect("create image view");
+    let view = ViewHost::create(v, view_create).expect("create image view");
 
     // ── Staging buffer ─────────────────────────────────────────────
 
@@ -667,24 +611,13 @@ fn graphics_pipeline_triangle() {
         memory_type: MemoryType::PREFER_HOST | MemoryType::HOST_RANDOM_ACCESS,
     };
     let staging = v
-        .buffer_from_data(staging_create, staging_alloc, vec![0u8; img_bytes as usize])
+        .from_data(staging_create, staging_alloc, vec![0u8; img_bytes as usize])
         .expect("staging buffer");
 
     // ── Record command buffer ──────────────────────────────────────
 
-    use ark_vk_binding::binding::ark::gpu::{
-        command_buffer::{
-            BufferImageCopy, CommandBufferUsage, Host as CmdHost, HostCommandBufferBuilder,
-            ImageAspectFlags, ImageBarrier, ImageSubresourceLayers, ImageSubresourceRange,
-            MemoryBarrier, Offset3d, Rect2d, RenderingColorAttachment,
-            RenderingDepthStencilAttachment, Viewport,
-        },
-        core::QueueFamily,
-        queue::Host as QueueHost,
-    };
-
     let builder =
-        v.primary_command_buffer(QueueFamily::Graphics, CommandBufferUsage::OneTimeSubmit);
+        CmdBuilder::new(v, QueueFamily::Graphics, CommandBufferUsage::OneTimeSubmit);
     // b is no longer used; replaced by Resource::new_borrow at each call site
 
     // Pipeline barrier: undefined → color attachment optimal
@@ -822,10 +755,10 @@ fn graphics_pipeline_triangle() {
     )
     .expect("copy image to buffer");
 
-    let cb = v.build_command_buffer(builder);
+    let cb = CmdBuildT::build(v, builder);
 
     // ── Submit ─────────────────────────────────────────────────────
-
+    
     let q = v.graphics();
     v.submit(
         Resource::new_borrow(q.rep()),

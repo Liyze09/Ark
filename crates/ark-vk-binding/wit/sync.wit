@@ -17,19 +17,21 @@ interface sync {
     ///
     /// Fences are signaled by the GPU when queue submission completes,
     /// and can be waited on from the CPU side.
-    resource fence { }
+    resource fence {
+        /// Create a fence, optionally in the signaled state.
+        create: static func(signaled: bool) -> result<fence, vulkan-error>;
 
-    /// Create a fence, optionally in the signaled state.
-    create-fence: func(signaled: bool) -> result<fence, vulkan-error>;
+        /// Wait for the fence to become signaled, with a timeout.
+        wait: func(timeout: option<u64>) -> result<_, vulkan-error>;
 
-    /// Wait for a fence to become signaled, with a timeout.
-    wait-for-fence: func(fence: borrow<fence>, timeout: u64) -> result<_, vulkan-error>;
+        /// Non-blocking check if the fence is signaled.
+        is-signaled: func() -> result<bool, vulkan-error>;
 
-    /// Non-blocking check if a fence is signaled.
-    fence-is-signaled: func(fence: borrow<fence>) -> result<bool, vulkan-error>;
+        /// Reset the fence to the unsignaled state.
+        reset: func() -> result<_, vulkan-error>;
+    }
 
-    /// Reset a fence to the unsignaled state.
-    reset-fence: func(fence: borrow<fence>) -> result<_, vulkan-error>;
+    wait-for-fences: func(fences: list<fence>, wait-all: bool, timeout: option<u64>) -> result<_, vulkan-error>;
 
     // ── Binary Semaphore ──
 
@@ -37,10 +39,10 @@ interface sync {
     ///
     /// Binary semaphores are signaled and waited on by queue submissions,
     /// providing ordering guarantees between batches of work.
-    resource binary-semaphore { }
-
-    /// Create a binary semaphore.
-    create-binary-semaphore: func() -> result<binary-semaphore, vulkan-error>;
+    resource binary-semaphore {
+        /// Create a binary semaphore.
+        create: static func() -> result<binary-semaphore, vulkan-error>;
+    }
 
     // ── Timeline Semaphore ──
 
@@ -49,32 +51,32 @@ interface sync {
     /// Timeline semaphores can be signaled and waited from **both** the
     /// GPU (via queue submission) and the CPU (via `signal-timeline-semaphore`
     /// and `wait-timeline-semaphore`).
-    resource timeline-semaphore { }
+    resource timeline-semaphore {
+        /// Create a timeline semaphore with the given initial counter value.
+        create: static func(initial-value: u64) -> result<timeline-semaphore, vulkan-error>;
 
-    /// Create a timeline semaphore with the given initial counter value.
-    create-timeline-semaphore: func(initial-value: u64) -> result<timeline-semaphore, vulkan-error>;
+        /// Signal a timeline semaphore from the CPU side.
+        ///
+        /// The semaphore counter is advanced to `value` when all previously
+        /// submitted work that signals this semaphore has completed.
+        signal: func(value: u64) -> result<_, vulkan-error>;
 
-    /// Signal a timeline semaphore from the CPU side.
-    ///
-    /// The semaphore counter is advanced to `value` when all previously
-    /// submitted work that signals this semaphore has completed.
-    signal-timeline-semaphore: func(semaphore: borrow<timeline-semaphore>, value: u64) -> result<_, vulkan-error>;
-
-    /// Wait for one or more timeline semaphores from the CPU side.
-    ///
-    /// `values` specifies the counter value to wait for for each semaphore
-    /// (must have the same length as `sems`).
-    /// When `wait-all` is true, the call blocks until **all** semaphores
-    /// reach their target values.  When false, it returns as soon as **any**
-    /// semaphore reaches its target.
-    ///
-    /// `timeout` is in nanoseconds.  Use `u64::MAX` for no timeout.
-    wait-timeline-semaphore: func(
-        semaphores: list<borrow<timeline-semaphore>>,
-        values: list<u64>,
-        wait-all: bool,
-        timeout: u64,
-    ) -> result<_, vulkan-error>;
+        /// Wait for one or more timeline semaphores from the CPU side (static).
+        ///
+        /// `values` specifies the counter value to wait for for each semaphore
+        /// (must have the same length as `sems`).
+        /// When `wait-all` is true, the call blocks until **all** semaphores
+        /// reach their target values.  When false, it returns as soon as **any**
+        /// semaphore reaches its target.
+        ///
+        /// `timeout` is in nanoseconds.  Use `u64::MAX` for no timeout.
+        wait: static func(
+            semaphores: list<borrow<timeline-semaphore>>,
+            values: list<u64>,
+            wait-all: bool,
+            timeout: u64,
+        ) -> result<_, vulkan-error>;
+    }
 
     variant semaphore-info {
         binary(binary-semaphore),
