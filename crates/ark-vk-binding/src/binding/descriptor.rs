@@ -66,15 +66,15 @@ pub(crate) struct GpuDescriptorSetLayout {
     _bindings: Vec<vk::DescriptorSetLayoutBinding>,
 }
 
+#[repr(transparent)]
 pub(crate) struct GpuDescriptorPool {
     pool: vk::DescriptorPool,
 }
 
+#[repr(transparent)]
 pub(crate) struct GpuDescriptorSet {
     pub(crate) set: vk::DescriptorSet,
 }
-
-type VkDevice<'a> = (&'a vk::DeviceCommands, vk::Device);
 
 fn build_vk_bindings(
     bindings: &[DescriptorBinding],

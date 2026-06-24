@@ -85,6 +85,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-lod"
+version = "0.1.0"
+dependencies = [
+ "vulkanalia",
+ "vulkanalia-vma",
+]
+
+[[package]]
 name = "ark-runtime"
 version = "0.1.0"
 dependencies = [
@@ -92,10 +100,8 @@ dependencies = [
  "ark-vk-binding",
  "log",
  "parking_lot",
- "png",
  "serde",
  "serde_json",
- "shaderc",
  "thiserror 2.0.18",
  "vulkanalia",
  "vulkanalia-vma",
@@ -108,9 +114,12 @@ dependencies = [
 name = "ark-vk-binding"
 version = "0.1.0"
 dependencies = [
+ "png",
+ "shaderc",
  "vulkanalia",
  "vulkanalia-vma",
  "wasmtime",
+ "wasmtime-wasi",
 ]
 
 [[package]]

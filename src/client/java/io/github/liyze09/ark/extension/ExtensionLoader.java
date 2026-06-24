@@ -15,6 +15,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -35,7 +36,7 @@ public class ExtensionLoader {
     private final Set<VulkanFeature> neededVulkanFeatures = new HashSet<>();
     private final Set<String> currentlyEnabledExtensions = new HashSet<>();
     private final Set<String> currentlyEnabledFeatures = new HashSet<>();
-    public List<Extension> extensions;
+    private final List<Extension> extensions;
 
     // ── compatibility check ────────────────────────────────────────────
     private VkPhysicalDevice device;
@@ -130,20 +131,20 @@ public class ExtensionLoader {
             boolean needRestart = false;
             var runtime = ext.getManifest().runtime;
             for (var req : runtime.required_vulkan_extensions) {
-                if (!ext.unsupportedRequiredVulkanExtensions.contains(req)
+                if (!ext.getUnsupportedRequiredVulkanExtensions().contains(req)
                         && !currentlyEnabledExtensions.contains(req)) {
                     needRestart = true;
                     break;
                 }
             }
             for (var req : runtime.required_vulkan_features) {
-                if (!ext.unsupportedRequiredVulkanFeatures.contains(req)
+                if (!ext.getUnsupportedRequiredVulkanFeatures().contains(req)
                         && !currentlyEnabledFeatures.contains(req)) {
                     needRestart = true;
                     break;
                 }
             }
-            ext.needRestart = needRestart;
+            ext.setNeedRestart(needRestart);
 
             neededVulkanExtensions.addAll(tempExts);
             neededVulkanFeatures.addAll(tempFeats);
@@ -165,5 +166,9 @@ public class ExtensionLoader {
 
     public List<String> getCurrentlyEnabledFeatures() {
         return currentlyEnabledFeatures.stream().toList();
+    }
+
+    public List<Extension> getExtensions() {
+        return Collections.unmodifiableList(extensions);
     }
 }

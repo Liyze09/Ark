@@ -45,6 +45,10 @@ public final class NativeContext {
 
     static {
         try {
+            /* TODO:
+            *   1. Use custom library loader instead of loader lookup.
+            *   2. Make ark_init_callbacks return library version to check compatibility.
+            * */
             System.loadLibrary("ark");
             var linker = Linker.nativeLinker();
             var lookup = SymbolLookup.loaderLookup();

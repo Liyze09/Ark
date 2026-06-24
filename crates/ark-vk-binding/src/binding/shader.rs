@@ -1,5 +1,5 @@
 use vulkanalia::prelude::v1_0::*;
-use vulkanalia::vk::{self, HasBuilder};
+use vulkanalia::vk;
 use wasmtime::component::Resource;
 
 use crate::{
@@ -16,6 +16,7 @@ use crate::{
 
 impl Host for VkContextView<'_> {}
 
+#[repr(transparent)]
 pub(crate) struct GpuShaderModule {
     pub(crate) module: vk::ShaderModule,
 }

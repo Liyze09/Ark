@@ -16,8 +16,6 @@ public class ExtensionManifest {
     public String id;
     public String namespaces = "ark:unnamed";
     public String entrypoint = "script";
-    public String entry_function = "initialize";
-    public String close_function;
     public RuntimeArgs runtime = new RuntimeArgs();
     public String name;
     public String version = "";
@@ -32,7 +30,7 @@ public class ExtensionManifest {
     public void verify() {
         if (id == null) {
             throw new IllegalArgumentException("Extension must have a 'id' field in manifest.json");
-        } else {
+        } else if (name == null) {
             name = id;
         }
     }

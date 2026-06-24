@@ -10,11 +10,12 @@ import net.minecraft.world.level.chunk.storage.RegionFile;
 import org.apache.commons.io.output.TeeOutputStream;
 import org.jspecify.annotations.NonNull;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.OutputStream;
+import java.io.*;
+import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
-import java.nio.ByteBuffer;
+import java.lang.foreign.ValueLayout;
+import java.util.Arrays;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 public class ServerLevelBinaryChunkSource implements BinaryChunkSource {
@@ -25,7 +26,7 @@ public class ServerLevelBinaryChunkSource implements BinaryChunkSource {
     }
 
     @Override
-    public CompletableFuture<MemorySegment> getBinaryChunk(ChunkPos pos) {
+    public CompletableFuture<MemorySegment> getBinaryChunk(ChunkPos pos, Arena arena) {
         return submitThrowingTask(() -> {
             var pendingStore = worker.getPendingWrites().get(pos);
             if (pendingStore != null) {
@@ -34,14 +35,23 @@ public class ServerLevelBinaryChunkSource implements BinaryChunkSource {
                     return null;
                 }
 
-                var buf = new DirectByteBufferOutputStream(8192);
+                var buf = new ByteArrayOutputStream(8192);
                 RegionFile regionFile = worker.getRegionFileStorage().getRegionFile(pos);
                 DataOutputStream regionOut = regionFile.getChunkDataOutputStream(pos);
                 try (TeeOutputStream tee = new TeeOutputStream(regionOut, buf);
                      DataOutputStream dataOut = new DataOutputStream(tee)) {
                     NbtIo.write(data, dataOut);
                 }
-                return MemorySegment.ofBuffer(buf.takeBuffer());
+                var segment = arena.allocate(buf.size());
+                MemorySegment.copy(
+                        buf.getBackedByteArray(),
+                        0,
+                        segment,
+                        ValueLayout.JAVA_BYTE,
+                        0,
+                        buf.size()
+                );
+                return segment;
             }
 
             RegionFile regionFile = worker.getRegionFileStorage().getRegionFile(pos);
@@ -49,11 +59,20 @@ public class ServerLevelBinaryChunkSource implements BinaryChunkSource {
             if (chunkStream == null) {
                 return null;
             }
-            var buf = new DirectByteBufferOutputStream(8192);
+            var buf = new ByteArrayOutputStream(8192);
             try (chunkStream) {
                 chunkStream.transferTo(buf);
             }
-            return MemorySegment.ofBuffer(buf.takeBuffer());
+            var segment = arena.allocate(buf.size());
+            MemorySegment.copy(
+                    buf.getBackedByteArray(),
+                    0,
+                    segment,
+                    ValueLayout.JAVA_BYTE,
+                    0,
+                    buf.size()
+            );
+            return segment;
         });
     }
 
@@ -82,44 +101,50 @@ public class ServerLevelBinaryChunkSource implements BinaryChunkSource {
         T get() throws Exception;
     }
 
-    private static final class DirectByteBufferOutputStream extends OutputStream {
-        private ByteBuffer buf;
+    private static final class ByteArrayOutputStream extends OutputStream {
+        private byte[] buf;
+        private int count;
 
-        DirectByteBufferOutputStream(int initialCapacity) {
-            buf = ByteBuffer.allocateDirect(initialCapacity);
-        }
-
-        @Override
-        public void write(int b) {
-            ensureCapacity(1);
-            buf.put((byte) b);
-        }
-
-        @Override
-        public void write(byte @NonNull [] src, int off, int len) {
-            ensureCapacity(len);
-            buf.put(src, off, len);
-        }
-
-        private void ensureCapacity(int needed) {
-            if (buf.remaining() < needed) {
-                int newCap = Math.max(buf.capacity() * 2, buf.position() + needed);
-                ByteBuffer newBuf = ByteBuffer.allocateDirect(newCap);
-                buf.flip();
-                newBuf.put(buf);
-                buf = newBuf;
+        public ByteArrayOutputStream(int size) {
+            if (size < 0) {
+                throw new IllegalArgumentException("Negative initial size: " + size);
+            } else {
+                this.buf = new byte[size];
             }
         }
 
-        ByteBuffer takeBuffer() {
-            buf.flip();
-            ByteBuffer result = buf;
-            buf = null;
-            return result;
+        private void ensureCapacity(int minCapacity) {
+            int oldCapacity = this.buf.length;
+            int minGrowth = minCapacity - oldCapacity;
+            if (minGrowth > 0) {
+                int prefLength = oldCapacity + Math.max(minGrowth, oldCapacity);
+                this.buf = Arrays.copyOf(this.buf, prefLength);
+            }
+
         }
 
         @Override
-        public void close() {
+        public synchronized void write(int b) {
+            this.ensureCapacity(this.count + 1);
+            this.buf[this.count] = (byte)b;
+            ++this.count;
+        }
+
+        @Override
+        public synchronized void write(byte @NonNull [] b, int off, int len) {
+            Objects.checkFromIndexSize(off, len, b.length);
+            this.ensureCapacity(this.count + len);
+            System.arraycopy(b, off, this.buf, this.count, len);
+            this.count += len;
+        }
+
+        public synchronized byte[] getBackedByteArray() {
+            return buf;
+        }
+
+        public synchronized int size() {
+            return this.count;
         }
     }
+
 }

@@ -1,4 +1,4 @@
-use vulkanalia::vk::{self, DeviceV1_0, DeviceV1_3, HasBuilder};
+use vulkanalia::vk::{self, DeviceV1_0, DeviceV1_3, HasBuilder, SuccessCode};
 use wasmtime::component::Resource;
 
 use crate::{
@@ -409,12 +409,13 @@ impl HostFenceFuture for VkContextView<'_> {
     fn try_wait(&mut self, self_: Resource<FenceFuture>) -> Result<bool, VulkanError> {
         let key = Resource::<GpuFenceFuture>::new_borrow(self_.rep());
         let ff = self.table.get(&key).map_err(|_| VulkanError::Unknown)?;
-        let raw =
-            unsafe { (self.owned.device_commands.get_fence_status)(self.owned.device, ff.fence) };
-        match raw {
-            vk::Result::SUCCESS => Ok(true),
-            vk::Result::NOT_READY => Ok(false),
-            _ => Err(vk_err(vk::ErrorCode::from(raw))),
+        unsafe { 
+            Ok(
+                self.vk_device()
+                    .get_fence_status(ff.fence)
+                    .map_err(vk_err)?
+                    .eq(&SuccessCode::SUCCESS)
+            )
         }
     }
 

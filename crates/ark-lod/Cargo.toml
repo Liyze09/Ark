@@ -1,5 +1,5 @@
 [package]
-name = "ark-vk-binding"
+name = "ark-lod"
 version = "0.1.0"
 edition = "2024"
 
@@ -8,12 +8,5 @@ crate-type = ["lib"]
 path = "src/lib.rs"
 
 [dependencies]
-wasmtime = { workspace = true }
 vulkanalia = { workspace = true }
 vulkanalia-vma = { workspace = true }
-
-[dev-dependencies]
-png = "0.18.1"
-shaderc = "0.10.1"
-wasmtime = { workspace = true }
-wasmtime-wasi = { workspace = true }

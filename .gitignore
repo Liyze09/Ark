@@ -45,4 +45,4 @@ replay_*.log
 /target
 
 # Testing
-crates/ark-runtime/target/
+crates/ark-vk-binding/test/

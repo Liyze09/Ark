@@ -21,7 +21,7 @@ import java.util.Set;
 @Mixin(VulkanBackend.class)
 public class VulkanBackendMixin {
     @Redirect(
-            method = "createDevice(Ljava/util/Collection;Lcom/mojang/blaze3d/vulkan/VulkanPhysicalDevice;)Lorg/lwjgl/vulkan/VkDevice;",
+            method = "createDevice(Ljava/util/Collection;Lcom/mojang/blaze3d/vulkan/VulkanPhysicalDevice;Ljava/util/Set;)Lorg/lwjgl/vulkan/VkDevice;",
             at = @At(
                     value = "INVOKE",
                     target = "Lorg/lwjgl/vulkan/VkPhysicalDeviceFeatures2;sType$Default()Lorg/lwjgl/vulkan/VkPhysicalDeviceFeatures2;"
@@ -39,13 +39,13 @@ public class VulkanBackendMixin {
     }
 
     @Inject(
-            method = "createDevice(JLcom/mojang/blaze3d/shaders/ShaderSource;Lcom/mojang/blaze3d/shaders/GpuDebugOptions;)Lcom/mojang/blaze3d/systems/GpuDevice;",
+            method = "createDevice(JLcom/mojang/blaze3d/shaders/ShaderSource;Lcom/mojang/blaze3d/shaders/GpuDebugOptions;Ljava/lang/Runnable;)Lcom/mojang/blaze3d/systems/GpuDevice;",
             at = @At(
                     value = "INVOKE",
-                    target = "Lcom/mojang/blaze3d/vulkan/VulkanBackend;createDevice(Ljava/util/Collection;Lcom/mojang/blaze3d/vulkan/VulkanPhysicalDevice;)Lorg/lwjgl/vulkan/VkDevice;"
+                    target = "Lcom/mojang/blaze3d/vulkan/VulkanBackend;createDevice(Ljava/util/Collection;Lcom/mojang/blaze3d/vulkan/VulkanPhysicalDevice;Ljava/util/Set;)Lorg/lwjgl/vulkan/VkDevice;"
             )
     )
-    public void addVulkanExtensions(long window, ShaderSource defaultShaderSource, GpuDebugOptions debugOptions, CallbackInfoReturnable<GpuDevice> cir, @Local(name = "deviceExtensions") Set<String> deviceExtensions, @Local(name = "physicalDevice") VulkanPhysicalDevice physicalDevice) {
+    public void addVulkanExtensions(long window, ShaderSource defaultShaderSource, GpuDebugOptions debugOptions, Runnable criticalShaderLoader, CallbackInfoReturnable<GpuDevice> cir, @Local(name = "deviceExtensions") Set<String> deviceExtensions, @Local(name = "physicalDevice") VulkanPhysicalDevice physicalDevice) {
         var loader = Ark.getExtensionLoader();
         loader.checkCompatibility(physicalDevice.vkPhysicalDevice(), ((VulkanPhysicalDeviceAccessor) physicalDevice).getDeviceFeatures());
         deviceExtensions.addAll(loader.getNeededVulkanExtensions());

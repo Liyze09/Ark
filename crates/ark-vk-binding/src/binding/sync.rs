@@ -93,14 +93,17 @@ pub fn vk_sharing_mode(
     }
 }
 
+#[repr(transparent)]
 pub(crate) struct GpuFence {
     pub(crate) fence: vk::Fence,
 }
 
+#[repr(transparent)]
 pub(crate) struct GpuBinarySemaphore {
     pub(crate) semaphore: vk::Semaphore,
 }
 
+#[repr(transparent)]
 pub(crate) struct GpuTimelineSemaphore {
     pub(crate) semaphore: vk::Semaphore,
 }
@@ -108,20 +111,7 @@ pub(crate) struct GpuTimelineSemaphore {
 // ── Interface-level functions ──
 
 impl Host for VkContextView<'_> {
-    fn wait_for_fences(&mut self,fences: Vec<Resource<Fence>>, wait_all: bool, timeout: Option<u64>) -> Result<(),VulkanError> {
-        let mut vk_fences: Vec<vk::Fence> = vec![];
-        for fence in fences {
-            let key = Resource::<GpuFence>::new_borrow(fence.rep());
-            let gpu_fence = self.table.get(&key).map_err(|_| VulkanError::Unknown)?;
-            vk_fences.push(gpu_fence.fence);
-        }
-        unsafe {
-            self.vk_device()
-                .wait_for_fences(&vk_fences, wait_all, timeout.unwrap_or(u64::MAX))
-                .map(|_| ())
-                .map_err(vk_err)
-        }
-    }
+
 }
 
 // ── HostFence ──
@@ -174,6 +164,36 @@ impl HostFence for VkContextView<'_> {
         unsafe {
             self.vk_device()
                 .reset_fences(&[gpu_fence.fence])
+                .map_err(vk_err)
+        }
+    }
+
+    fn wait_all(&mut self,fences: Vec<Resource<Fence>>, timeout: Option<u64>) -> Result<(),VulkanError> {
+        let mut vk_fences: Vec<vk::Fence> = vec![];
+        for fence in fences {
+            let key = Resource::<GpuFence>::new_borrow(fence.rep());
+            let gpu_fence = self.table.get(&key).map_err(|_| VulkanError::Unknown)?;
+            vk_fences.push(gpu_fence.fence);
+        }
+        unsafe {
+            self.vk_device()
+                .wait_for_fences(&vk_fences, true, timeout.unwrap_or(u64::MAX))
+                .map(|_| ())
+                .map_err(vk_err)
+        }
+    }
+
+    fn wait_any(&mut self,fences: Vec<Resource<Fence>>, timeout: Option<u64>) -> Result<(),VulkanError> {
+        let mut vk_fences: Vec<vk::Fence> = vec![];
+        for fence in fences {
+            let key = Resource::<GpuFence>::new_borrow(fence.rep());
+            let gpu_fence = self.table.get(&key).map_err(|_| VulkanError::Unknown)?;
+            vk_fences.push(gpu_fence.fence);
+        }
+        unsafe {
+            self.vk_device()
+                .wait_for_fences(&vk_fences, false, timeout.unwrap_or(u64::MAX))
+                .map(|_| ())
                 .map_err(vk_err)
         }
     }
@@ -231,23 +251,60 @@ impl HostTimelineSemaphore for VkContextView<'_> {
 
     fn wait(
         &mut self,
-        semaphores: Vec<Resource<TimelineSemaphore>>,
-        values: Vec<u64>,
-        wait_all: bool,
+        self_: Resource<TimelineSemaphore>,
+        value: u64,
+        timeout_ns: u64,
+    ) -> Result<(), VulkanError> {
+        let key = Resource::<GpuTimelineSemaphore>::new_borrow(self_.rep());
+        let gpu_sem = self.table.get(&key).map_err(|_| VulkanError::Unknown)?;
+        let vk_sem = [gpu_sem.semaphore];
+        let vk_value = [value];
+        let wait_info = vk::SemaphoreWaitInfo::builder()
+            .semaphores(&vk_sem)
+            .values(&vk_value)
+            .flags(vk::SemaphoreWaitFlags::empty());
+        unsafe { self.vk_device().wait_semaphores(&wait_info, timeout_ns) }.map_err(vk_err)?;
+        Ok(())
+    }
+
+    fn wait_all(
+        &mut self,
+        semaphores: Vec<(Resource<TimelineSemaphore>, u64)>,
         timeout_ns: u64,
     ) -> Result<(), VulkanError> {
         let mut vk_sems: Vec<vk::Semaphore> = Vec::with_capacity(semaphores.len());
         let mut vk_values: Vec<u64> = Vec::with_capacity(semaphores.len());
-        for (i, sem) in semaphores.iter().enumerate() {
+        for (sem, i) in semaphores.iter() {
             let key = Resource::<GpuTimelineSemaphore>::new_borrow(sem.rep());
             let gpu_sem = self.table.get(&key).map_err(|_| VulkanError::Unknown)?;
             vk_sems.push(gpu_sem.semaphore);
-            vk_values.push(values[i]);
+            vk_values.push(*i);
         }
         let wait_info = vk::SemaphoreWaitInfo::builder()
             .semaphores(&vk_sems)
             .values(&vk_values)
-            .flags(if wait_all { vk::SemaphoreWaitFlags::empty() } else { vk::SemaphoreWaitFlags::ANY });
+            .flags(vk::SemaphoreWaitFlags::empty());
+        unsafe { self.vk_device().wait_semaphores(&wait_info, timeout_ns) }.map_err(vk_err)?;
+        Ok(())
+    }
+
+    fn wait_any(
+        &mut self,
+        semaphores: Vec<(Resource<TimelineSemaphore>, u64)>,
+        timeout_ns: u64,
+    ) -> Result<(), VulkanError> {
+        let mut vk_sems: Vec<vk::Semaphore> = Vec::with_capacity(semaphores.len());
+        let mut vk_values: Vec<u64> = Vec::with_capacity(semaphores.len());
+        for (sem, i) in semaphores.iter() {
+            let key = Resource::<GpuTimelineSemaphore>::new_borrow(sem.rep());
+            let gpu_sem = self.table.get(&key).map_err(|_| VulkanError::Unknown)?;
+            vk_sems.push(gpu_sem.semaphore);
+            vk_values.push(*i);
+        }
+        let wait_info = vk::SemaphoreWaitInfo::builder()
+            .semaphores(&vk_sems)
+            .values(&vk_values)
+            .flags(vk::SemaphoreWaitFlags::ANY);
         unsafe { self.vk_device().wait_semaphores(&wait_info, timeout_ns) }.map_err(vk_err)?;
         Ok(())
     }

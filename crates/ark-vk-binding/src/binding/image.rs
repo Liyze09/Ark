@@ -28,10 +28,12 @@ pub(crate) struct GpuImage {
     allocation: vulkanalia_vma::Allocation,
 }
 
+#[repr(transparent)]
 pub(crate) struct GpuImageView {
     pub(crate) view: vk::ImageView,
 }
 
+#[repr(transparent)]
 pub(crate) struct GpuSampler {
     pub(crate) sampler: vk::Sampler,
 }

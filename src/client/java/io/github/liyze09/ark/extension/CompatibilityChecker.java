@@ -292,7 +292,8 @@ public class CompatibilityChecker {
                 var descriptor = new VulkanPNextStruct(sType, structSize);
                 structMap.put(clazz, descriptor);
                 registerStruct(featureMap, descriptor, clazz);
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                Ark.LOGGER.warn("Failed to register Vulkan feature struct '{}': {}", className, e.toString());
             }
         }
 
@@ -316,6 +317,7 @@ public class CompatibilityChecker {
                 clazz.getMethod("free").invoke(instance);
             }
         } catch (Exception e) {
+            Ark.LOGGER.warn("Failed to extract sType for Vulkan struct '{}': {}", clazz.getSimpleName(), e.toString());
             return -1;
         }
     }
@@ -326,7 +328,7 @@ public class CompatibilityChecker {
      * Scans all {@code boolean methodName()} getters whose uppercase constant exists in the class.
      */
     private static void registerStruct(Map<String, VulkanFeature> map, VulkanPNextStruct struct, Class<?> clazz) {
-        for (var method : clazz.getMethods()) {
+        for (var method : clazz.getDeclaredMethods()) {
             if (method.getReturnType() != boolean.class || method.getParameterCount() != 0) continue;
             if (!Modifier.isPublic(method.getModifiers())) continue;
 
@@ -361,49 +363,55 @@ public class CompatibilityChecker {
             Set<VulkanFeature> neededFeatures
     ) {
         var supportedExtensions = listDeviceExtensions(device);
-        ensureAllVersionStructsInChain(features);
-        VK11.vkGetPhysicalDeviceFeatures2(device, features);
 
-        for (var extension : extensions) {
-            var runtime = extension.getManifest().runtime;
+        // All pNext struct allocation and vkGetPhysicalDeviceFeatures2 must
+        // happen within the same MemoryStack frame — otherwise the pNext
+        // chain contains dangling pointers (use-after-free).
+        try (var stack = MemoryStack.stackPush()) {
+            ensureAllVersionStructsInChain(features, stack);
+            VK11.vkGetPhysicalDeviceFeatures2(device, features);
 
-            for (var ext : runtime.required_vulkan_extensions) {
-                if (supportedExtensions.contains(ext)) {
-                    neededExtensions.add(ext);
-                } else {
-                    extension.unsupportedRequiredVulkanExtensions.add(ext);
+            for (var extension : extensions) {
+                var runtime = extension.getManifest().runtime;
+
+                for (var ext : runtime.required_vulkan_extensions) {
+                    if (supportedExtensions.contains(ext)) {
+                        neededExtensions.add(ext);
+                    } else {
+                        extension.addUnsupportedRequiredVulkanExtension(ext);
+                    }
                 }
-            }
 
-            for (var ext : runtime.optional_vulkan_extensions) {
-                if (supportedExtensions.contains(ext)) {
-                    neededExtensions.add(ext);
-                } else {
-                    extension.unsupportedOptionalVulkanExtensions.add(ext);
+                for (var ext : runtime.optional_vulkan_extensions) {
+                    if (supportedExtensions.contains(ext)) {
+                        neededExtensions.add(ext);
+                    } else {
+                        extension.addUnsupportedOptionalVulkanExtension(ext);
+                    }
                 }
-            }
 
-            for (var featureName : runtime.required_vulkan_features) {
-                var vf = lookupFeature(featureName);
-                if (vf == null) {
-                    Ark.LOGGER.info("Required Vulkan feature '{}' from extension {} is unknown. The extension will be disabled.", featureName, extension.getManifest().id);
-                    extension.unsupportedRequiredVulkanFeatures.add(featureName);
-                } else if (vf.get(features)) {
-                    neededFeatures.add(vf);
-                } else {
-                    extension.unsupportedRequiredVulkanFeatures.add(featureName);
+                for (var featureName : runtime.required_vulkan_features) {
+                    var vf = lookupFeature(featureName);
+                    if (vf == null) {
+                        Ark.LOGGER.info("Required Vulkan feature '{}' from extension {} is unknown. The extension will be disabled.", featureName, extension.getManifest().id);
+                        extension.addUnsupportedRequiredVulkanFeature(featureName);
+                    } else if (vf.get(features)) {
+                        neededFeatures.add(vf);
+                    } else {
+                        extension.addUnsupportedRequiredVulkanFeature(featureName);
+                    }
                 }
-            }
 
-            for (var featureName : runtime.optional_vulkan_features) {
-                var vf = lookupFeature(featureName);
-                if (vf == null) {
-                    Ark.LOGGER.info("Optional Vulkan feature '{}' from extension {} is unknown.", featureName, extension.getManifest().id);
-                    extension.unsupportedOptionalVulkanFeatures.add(featureName);
-                } else if (vf.get(features)) {
-                    neededFeatures.add(vf);
-                } else {
-                    extension.unsupportedOptionalVulkanFeatures.add(featureName);
+                for (var featureName : runtime.optional_vulkan_features) {
+                    var vf = lookupFeature(featureName);
+                    if (vf == null) {
+                        Ark.LOGGER.info("Optional Vulkan feature '{}' from extension {} is unknown.", featureName, extension.getManifest().id);
+                        extension.addUnsupportedOptionalVulkanFeature(featureName);
+                    } else if (vf.get(features)) {
+                        neededFeatures.add(vf);
+                    } else {
+                        extension.addUnsupportedOptionalVulkanFeature(featureName);
+                    }
                 }
             }
         }
@@ -425,14 +433,16 @@ public class CompatibilityChecker {
 
     /**
      * Walks the pNext chain and attaches any missing feature structs.
-     * An existing struct (matched by sType) is reused; a missing one is allocated.
+     * An existing struct (matched by sType) is reused; a missing one is allocated
+     * on the supplied {@code stack}.
+     * <p>
+     * The caller <b>must</b> keep {@code stack} alive until after
+     * {@code vkGetPhysicalDeviceFeatures2} has been called.
      */
-    private static void ensureAllVersionStructsInChain(VkPhysicalDeviceFeatures2 features) {
-        try (var stack = MemoryStack.stackPush()) {
-            for (var descriptor : STRUCT_DESCRIPTORS.values()) {
-                if (descriptor.sType() == VK10_STYPE) continue;
-                descriptor.findOrCreateStructInPNextChain(features, stack);
-            }
+    private static void ensureAllVersionStructsInChain(VkPhysicalDeviceFeatures2 features, MemoryStack stack) {
+        for (var descriptor : STRUCT_DESCRIPTORS.values()) {
+            if (descriptor.sType() == VK10_STYPE) continue;
+            descriptor.findOrCreateStructInPNextChain(features, stack);
         }
     }
 

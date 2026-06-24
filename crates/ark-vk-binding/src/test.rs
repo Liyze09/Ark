@@ -10,14 +10,14 @@ use vulkanalia_vma::vma::VmaAllocator;
 use wasmtime::component::Resource;
 use wasmtime_wasi::ResourceTable;
 
-use ark_vk_binding::binding::ark::gpu::{
+use crate::binding::ark::gpu::{
     buffer::{BufferCreateInfo, BufferUsage, HostBuffer}, command_buffer::{BufferImageCopy, CommandBufferUsage, HostCommandBuffer as CmdBuildT, HostCommandBufferBuilder as CmdBuilder, ImageAspectFlags, ImageBarrier, ImageSubresourceLayers, ImageSubresourceRange, MemoryBarrier, Offset3d, PipelineBindPoint, Rect2d, RenderingColorAttachment, RenderingDepthStencilAttachment, Viewport}, core::QueueFamily, descriptor::{BufferDescriptorInfo, DescriptorBinding, DescriptorBindingFlags, DescriptorPoolCreateFlags, DescriptorType, DescriptorWrite, HostDescriptorPool as PoolHost, HostDescriptorSet as SetHost, HostDescriptorSetLayout as DslHost, PoolSize}, image::{
         Extent3d, HostImage as ImageHost, HostImageView as ViewHost, ImageCreateFlags, ImageCreateInfo, ImageTiling, ImageType, ImageUsage, ImageViewCreateInfo, ImageViewType, SampleCount
     }, memory::{AllocateInfo, MemoryType}, pipeline::{
         DescriptorSetInfo, GraphicsPipelineCreateInfo, HostComputePipeline as ComputeHost, HostGraphicsPipeline as GraphicsHost, HostPipelineLayout as LayoutHost, PrimitiveTopology
     }, queue::{Host as QueueGetter, HostQueue}, shader::HostShaderModule
 };
-use ark_vk_binding::{VkContextOwned, VkContextView};
+use crate::{VkContextOwned, VkContextView};
 
 // ── Test infrastructure ───────────────────────────────────────────────
 
@@ -193,9 +193,9 @@ fn pick_physical_device(
 // ── Helper: build a compute pipeline with one storage buffer binding ──
 
 struct ComputePipelineSet {
-    pl: Resource<ark_vk_binding::binding::ark::gpu::pipeline::PipelineLayout>,
-    cp: Resource<ark_vk_binding::binding::ark::gpu::pipeline::ComputePipeline>,
-    set: Resource<ark_vk_binding::binding::ark::gpu::descriptor::DescriptorSet>,
+    pl: Resource<crate::binding::ark::gpu::pipeline::PipelineLayout>,
+    cp: Resource<crate::binding::ark::gpu::pipeline::ComputePipeline>,
+    set: Resource<crate::binding::ark::gpu::descriptor::DescriptorSet>,
 }
 
 fn build_compute_pipeline(
@@ -486,7 +486,7 @@ fn render_triangle_to_png() {
     let result = v.read(out_buf, 0, img_size).expect("read back");
 
     // Write PNG
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/target/triangle_test.png");
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/test/compute_triangle.png");
     if let Some(parent) = std::path::Path::new(path).parent() {
         std::fs::create_dir_all(parent).ok();
     }
@@ -588,8 +588,8 @@ fn graphics_pipeline_triangle() {
         image: Resource::new_borrow(img.rep()),
         view_type: ImageViewType::Dim2d,
         format: vk::Format::R8G8B8A8_UNORM.as_raw() as u32,
-        subresource_range: ark_vk_binding::binding::ark::gpu::image::ImageSubresourceRange {
-            aspect_mask: ark_vk_binding::binding::ark::gpu::image::ImageAspectFlags::COLOR,
+        subresource_range: crate::binding::ark::gpu::image::ImageSubresourceRange {
+            aspect_mask: crate::binding::ark::gpu::image::ImageAspectFlags::COLOR,
             base_mip_level: 0,
             level_count: 1,
             base_array_layer: 0,
@@ -661,7 +661,7 @@ fn graphics_pipeline_triangle() {
         load_op: vk::AttachmentLoadOp::CLEAR.as_raw() as u32,
         store_op: vk::AttachmentStoreOp::STORE.as_raw() as u32,
         clear_value: Some(
-            ark_vk_binding::binding::ark::gpu::command_buffer::ClearColor {
+            crate::binding::ark::gpu::command_buffer::ClearColor {
                 floats: (0.1, 0.1, 0.15, 1.0),
             },
         ),
@@ -734,7 +734,7 @@ fn graphics_pipeline_triangle() {
         buffer_row_length: 0,
         buffer_image_height: 0,
         image_subresource: ImageSubresourceLayers {
-            aspect_mask: ark_vk_binding::binding::ark::gpu::command_buffer::ImageAspectFlags::COLOR,
+            aspect_mask: crate::binding::ark::gpu::command_buffer::ImageAspectFlags::COLOR,
             mip_level: 0,
             base_array_layer: 0,
             layer_count: 1,
@@ -775,7 +775,7 @@ fn graphics_pipeline_triangle() {
 
     let result = v.read(staging, 0, img_bytes).expect("read staging");
 
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/target/graphics_triangle.png");
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/test/graphics_triangle.png");
     if let Some(parent) = std::path::Path::new(path).parent() {
         std::fs::create_dir_all(parent).ok();
     }

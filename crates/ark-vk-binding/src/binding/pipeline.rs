@@ -10,7 +10,7 @@ use crate::{
                 ComputePipeline, DescriptorSetInfo, GraphicsPipeline,
                 GraphicsPipelineCreateInfo, Host, HostComputePipeline, HostGraphicsPipeline,
                 HostPipelineLayout, HostRayTracingPipeline, PipelineLayout,
-                PrimitiveTopology, RayTracingPipeline, VertexAttribute,
+                PrimitiveTopology, RayTracingPipeline,
             },
             shader::{PushConstantRange, ShaderModule},
         },
@@ -19,18 +19,22 @@ use crate::{
     VkContextView,
 };
 
+#[repr(transparent)]
 pub(crate) struct GpuPipelineLayout {
     pub(crate) layout: vk::PipelineLayout,
 }
 
+#[repr(transparent)]
 pub(crate) struct GpuComputePipeline {
     pub(crate) pipeline: vk::Pipeline,
 }
 
+#[repr(transparent)]
 pub(crate) struct GpuGraphicsPipeline {
     pub(crate) pipeline: vk::Pipeline,
 }
 
+#[repr(transparent)]
 pub(crate) struct GpuRayTracingPipeline {
     pub(crate) pipeline: vk::Pipeline,
 }

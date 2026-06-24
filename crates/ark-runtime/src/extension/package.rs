@@ -49,9 +49,6 @@ pub struct ExtensionManifest {
     pub namespaces: String,
     #[serde(default = "default_entrypoint")]
     pub entrypoint: String,
-    #[serde(default = "default_entry_function")]
-    pub entry_function: String,
-    pub close_function: Option<String>,
     #[serde(default)]
     pub runtime: RuntimeArgs,
     pub name: Option<String>,
@@ -63,10 +60,6 @@ pub struct ExtensionManifest {
     pub contributors: Option<ValueOrList>,
     pub contact: Option<HashMap<String, String>>,
     pub custom: Option<HashMap<String, String>>,
-}
-
-fn default_entry_function() -> String {
-    "initialize".to_string()
 }
 
 fn default_namespace() -> String {

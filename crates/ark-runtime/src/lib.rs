@@ -1,6 +1,4 @@
 pub mod extension;
-#[cfg(test)]
-mod test;
 pub mod vulkan;
 
 pub use extension::package::{

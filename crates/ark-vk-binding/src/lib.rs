@@ -8,6 +8,8 @@ use vulkanalia_vma::vma::VmaAllocator;
 use wasmtime::component::{HasData, ResourceTable};
 
 pub mod binding;
+#[cfg(test)]
+pub mod test;
 
 pub struct VkContextOwned {
     pub instance: vk::Instance,
